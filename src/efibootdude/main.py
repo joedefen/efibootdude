@@ -26,10 +26,11 @@ class EfiBootDude:
     """ Main class for curses atop efibootmgr"""
     singleton = None
 
-    def __init__(self):
+    def __init__(self, testfile=None):
         # self.cmd_loop = CmdLoop(db=False) # just running as command
         assert not EfiBootDude.singleton
         EfiBootDude.singleton = self
+        self.testfile = testfile
 
         spin = self.spin = OptionSpinner()
         spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
@@ -113,10 +114,14 @@ class EfiBootDude:
     def digest_boots(self):
         """ Digest the output of 'efibootmgr'."""
         # Define the command to run
-        command = 'efibootmgr'.split()
-        # Run the command and capture the output
-        result = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=True)
-        lines = result.stdout.splitlines()
+        lines = []
+        if self.testfile:
+            with open(self.testfile, 'r', encoding='utf-8') as fh:
+                lines = fh.readlines()
+        else:
+            command = 'efibootmgr'.split()
+            result = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=True)
+            lines = result.stdout.splitlines()
         rv = []
         width1 = 0  # width of info1
         label_wid = 0
@@ -141,8 +146,8 @@ class EfiBootDude:
             )
 
             mat = re.match(r'\bBoot([0-9a-f]+)\b(\*?)' # Boot0024*
-                           + r'\s+(\w.*\w)\s+' # Linux Boot Manager
-                           + r'\b(\w+\(.*)$', # HD(4,GPT,cd15e3b1-...
+                           + r'\s+(\S.*\S|\S)\s*\t' # Linux Boot Manager
+                           + r'\s*(\S.*\S|\S)\s*$', # HD(4,GPT,cd15e3b1-...
                            line, re.IGNORECASE)
             if not mat:
                 ns.ident = key
@@ -243,7 +248,7 @@ class EfiBootDude:
             os.system('/bin/echo; /bin/echo')
 
             for cmd in cmds:
-                os.system(f'set -x; {cmd}; /bin/echo "    <<<ExitCode=$?>>>"')
+                os.system(f'(set -x; {cmd}); /bin/echo "    <<<ExitCode=$?>>>"')
 
             os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
             self.reinit()
@@ -380,7 +385,7 @@ class EfiBootDude:
             answer = 'y'
             if self.mods.dirty:
                 answer = self.win.answer(
-                    prompt='Enter "y" to abandon edits and exit [then Enter]')
+                    prompt='Enter "y" to abandon edits and exit')
             if answer.strip().lower().startswith('y'):
                 self.win.stop_curses()
                 os.system('clear; stty sane')
@@ -394,7 +399,7 @@ class EfiBootDude:
                 seed = ns.label.split()[0]
                 while True:
                     answer = self.win.answer(
-                        prompt='Enter timeout seconds or clear to abort [then Enter]',
+                        prompt='Enter timeout seconds or clear to abort',
                         seed=seed, width=80)
                     seed = answer = answer.strip()
                     if not answer:
@@ -452,7 +457,7 @@ class EfiBootDude:
         if key == ord('t') and ns.is_boot:
             seed = ns.label
             while True:
-                answer = self.win.answer(prompt='Enter new label or clear to abort [then Enter], ',
+                answer = self.win.answer(prompt='Enter new label or clear to abort',
                     seed=seed, width=80)
                 seed = answer = answer.strip()
                 if not answer:
@@ -465,7 +470,7 @@ class EfiBootDude:
 
         if key == ord('f') and self.mods.dirty:
             answer = self.win.answer(
-                prompt='Enter "y" to clear edits and refresh [then Enter]')
+                prompt='Enter "y" to clear edits and refresh')
             if answer.strip().lower().startswith('y'):
                 self.reinit()
             return None
@@ -480,8 +485,12 @@ class EfiBootDude:
 
 def main():
     """ The program """
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('testfile', nargs='?', default=None)
+    opts = parser.parse_args()
 
-    dude = EfiBootDude()
+    dude = EfiBootDude(testfile=opts.testfile)
     dude.main_loop()
 
 if __name__ == '__main__':

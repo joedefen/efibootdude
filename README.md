@@ -14,11 +14,14 @@ boot menu and parameters while running Linux.
 * setting boot entries active or inactive, and
 * setting the boot menu timeout value (until it boots the default entry).
 
-To be sure, there are many other esoteric uses of `efibootmanager`.
+To be sure, there are many other esoteric uses of `efibootmanager` including adding
+a new boot entry; for such needs, just use `efibootmgr` directly.
   
 ## Usage
 After running `efibootdude`, you'll see a screen like this:
+
 ![efibootdude-screenshot](https://github.com/joedefen/efibootdude/blob/main/images/efibootdude-screenshot.png?raw=true).
+
 At this point
 * The current line starts with `>` and is highlighted.
 * The top line shows actions for the current line.
