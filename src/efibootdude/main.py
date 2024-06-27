@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import subprocess
 import traceback
 import curses as cs
-import xml.etree.ElementTree as ET
+# import xml.etree.ElementTree as ET
 from efibootdude.PowerWindow import Window, OptionSpinner
 
 
@@ -89,16 +89,28 @@ class EfiBootDude:
 
     def get_part_uuids(self):
         """ Get all the Partition UUIDS"""
+#       uuids = {}
+#       with open('/run/blkid/blkid.tab', encoding='utf8') as fh:
+#           # sample: <device ... TYPE="vfat"
+#           #   PARTUUID="25d2dea1-9f68-1644-91dd-4836c0b3a30a">/dev/nvme0n1p1</device>
+#           for xml_line in fh:
+#               element = ET.fromstring(xml_line)
+#               if 'PARTUUID' in element.attrib:
+#                   device=element.text.strip()
+#                   name = self.mounts.get(device, device)
+#                   uuids[element.attrib['PARTUUID'].lower()] = name
+#       return uuids
+
         uuids = {}
-        with open('/run/blkid/blkid.tab', encoding='utf8') as fh:
-            # sample: <device ... TYPE="vfat"
-            #   PARTUUID="25d2dea1-9f68-1644-91dd-4836c0b3a30a">/dev/nvme0n1p1</device>
-            for xml_line in fh:
-                element = ET.fromstring(xml_line)
-                if 'PARTUUID' in element.attrib:
-                    device=element.text.strip()
-                    name = self.mounts.get(device, device)
-                    uuids[element.attrib['PARTUUID'].lower()] = name
+        partuuid_path = '/dev/disk/by-partuuid/'
+
+        if not os.path.exists(partuuid_path):
+            return uuids
+        for entry in os.listdir(partuuid_path):
+            full_path = os.path.join(partuuid_path, entry)
+            if os.path.islink(full_path):
+                device_path = os.path.realpath(full_path)
+                uuids[device_path] = entry
         return uuids
 
     @staticmethod
@@ -232,7 +244,8 @@ class EfiBootDude:
             cmds.append(f'{prefix} --bootnum {ident} --label "{tag}"')
         if self.mods.order:
             orders = [ns.ident for ns in self.digests if ns.is_boot]
-            cmds.append(f'{prefix} --bootorder {','.join(orders)}')
+            orders = ','.join(orders)
+            cmds.append(f'{prefix} --bootorder {orders}')
         if self.mods.next:
             cmds.append(f'{prefix} --bootnext {self.mods.next}')
         if self.mods.timeout:
