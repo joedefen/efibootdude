@@ -34,6 +34,7 @@ At this point
 * When ready to write the changes to the BIOS, enter 'w'.
 * When writing the changes, `efibootdude` drops out of menu mode so you can
   verify the underlying commands, error codes, and error messages.
+* Use the `ESC` key to abandon changes and refresh the boot information.
 
 ## Caveats
 * Some operations may not work permanently even though there is no indication from `efibootmgr`

@@ -37,10 +37,10 @@ class EfiBootDude:
         spin.add_key('verbose', 'v - toggle verbose', vals=[False, True])
 
         # FIXME: keys
-        other = 'tudrnmwf*zqx'
+        other = 'tudrnmw*zqx'
         other_keys = set(ord(x) for x in other)
         other_keys.add(cs.KEY_ENTER)
-        # other_keys.add(27) # ESCAPE
+        other_keys.add(27) # ESCAPE
         other_keys.add(10) # another form of ENTER
         self.opts = spin.default_obj
 
@@ -110,18 +110,17 @@ class EfiBootDude:
             full_path = os.path.join(partuuid_path, entry)
             if os.path.islink(full_path):
                 device_path = os.path.realpath(full_path)
-                uuids[device_path] = entry
+                uuids[entry] = device_path
         return uuids
 
     @staticmethod
-    def extract_uuid(line):
+    def extract_uuids(line):
         """ Find uuid string in a line """
         # Define the regex pattern for UUID (e.g., 25d2dea1-9f68-1644-91dd-4836c0b3a30a)
         pattern = r'\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b'
         # Search for the pattern in the line
-        match = re.search(pattern, line, re.IGNORECASE)
-        return match.group(0).lower() if match else None
-
+        mats = re.findall(pattern, line, re.IGNORECASE)
+        return mats
 
     def digest_boots(self):
         """ Digest the output of 'efibootmgr'."""
@@ -177,16 +176,19 @@ class EfiBootDude:
             label_wid = max(label_wid, len(ns.label))
             other = mat.group(4)
 
-            mat = re.search(r'/?File\(([^)]*)\)', other, re.IGNORECASE)
+            pat = r'(?:/?\b\w*\(|/)(\\[^/()]+)(?:$|[()/])'
+            mat = re.search(pat, other, re.IGNORECASE)
             device, subpath = '', '' # e.g., /boot/efi, \EFI\UBUNTU\SHIMX64.EFI
             if mat:
                 subpath = mat.group(1) + ' '
                 start, end = mat.span()
                 other = other[:start] + other[end:]
 
-            uuid = self.extract_uuid(other)
-            if uuid and uuid in self.uuids:
-                device = self.uuids[uuid]
+            uuids = self.extract_uuids(other)
+            for uuid in uuids:
+                if uuid and uuid in self.uuids:
+                    device = self.uuids[uuid]
+                    break
 
             if device:
                 ns.info1 = device
@@ -293,7 +295,7 @@ class EfiBootDude:
                     '   * - toggle whether entry is active'
                     '   m - modify - modify the value'
                     '   w - write - write the changes',
-                    '   f - freshen - clear changes and re-read boot state',
+                    '   ESC - abandon changes and re-read boot state',
                 ]
                 for line in lines:
                     self.win.put_body(line)
@@ -354,7 +356,6 @@ class EfiBootDude:
                 actions['m'] = 'modify'
             if self.mods.dirty:
                 actions['w'] = 'write'
-                actions['f'] = 'fresh'
 
         return actions
 
@@ -481,10 +482,13 @@ class EfiBootDude:
                     self.mods.dirty = True
                     break
 
-        if key == ord('f') and self.mods.dirty:
-            answer = self.win.answer(
-                prompt='Enter "y" to clear edits and refresh')
-            if answer.strip().lower().startswith('y'):
+        if key == 27:  # ESC
+            if self.mods.dirty:
+                answer = self.win.answer(
+                    prompt='Enter "y" to clear edits and refresh')
+                if answer.strip().lower().startswith('y'):
+                    self.reinit()
+            else:
                 self.reinit()
             return None
 
