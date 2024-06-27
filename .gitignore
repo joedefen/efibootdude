@@ -1,0 +1,6 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+.vscode/
+*.egg-info/
+*.tar.gz
+*.whl
