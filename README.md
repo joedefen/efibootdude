@@ -18,7 +18,7 @@ To be sure, there are many other esoteric uses of `efibootmanager`.
   
 ## Usage
 After running `efibootdude`, you'll see a screen like this:
-![efibootdude-screenshot](https://github.com/joedefen/efi-bootdude/blob/main/images/efibootdude-screenshot.png?raw=true).
+![efibootdude-screenshot](https://github.com/joedefen/efibootdude/blob/main/images/efibootdude-screenshot.png?raw=true).
 At this point
 * The current line starts with `>` and is highlighted.
 * The top line shows actions for the current line.
