@@ -23,19 +23,22 @@ After running `efibootdude` and making some changes, you'll see a screen compara
 ![efibootdude-screenshot](https://github.com/joedefen/efibootdude/blob/main/images/efibootdude-screenshot.png?raw=true).
 
 At this point
-* The current line starts with `>` and is highlighted.
+* The "current" line starts with `>` and is highlighted.
 * The top line shows actions for the current line; type the underscored letter
-  to effect the action.
-* Enter `?` for a more complete explanation of the keys, navigation keys, etc.
+  to effect its action.
+* Type `?` for a more complete explanation of the keys, navigation keys, etc.
   * **ALWAYS** view the help at least once if unfamiliar with this tool,
     it navigation, and/or uncertain of keys not shown on top line.
 * With this current line, we can:
-  * Use `u` or `d` to move it up or down in the boot order.
-  * Use `t` to relabel the boot entry.
-  * Use `r` to remove it.
+  * Type `u` or `d` to move it up or down in the boot order.
+  * Type `t` to relabel the boot entry.
+  * Type `r` to remove the boot entry.
   * And so forth.
-* Use the `ESC` key to abandon any changes and reload the boot information.
+* The entries with `*` on the left are active boot entries; toggle whether
+  active by typing `*` for the corresponding entries.
+* Press `ESC` key to abandon any changes and reload the boot information.
 * When ready to write the changes to the BIOS, enter `w`.
+* When the changes look good, type `b` to reboot, if you wish.
 * When writing the changes, `efibootdude` drops out of menu mode so you can
   verify the underlying commands, error codes, and error messages.
 

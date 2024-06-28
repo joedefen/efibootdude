@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import subprocess
 import traceback
 import curses as cs
+import argparse
 # import xml.etree.ElementTree as ET
 from efibootdude.PowerWindow import Window, OptionSpinner
 
@@ -37,7 +38,7 @@ class EfiBootDude:
         spin.add_key('verbose', 'v - toggle verbose', vals=[False, True])
 
         # FIXME: keys
-        other = 'tudrnmw*zqx'
+        other = 'btudrnmw*zqx'
         other_keys = set(ord(x) for x in other)
         other_keys.add(cs.KEY_ENTER)
         other_keys.add(27) # ESCAPE
@@ -89,18 +90,6 @@ class EfiBootDude:
 
     def get_part_uuids(self):
         """ Get all the Partition UUIDS"""
-#       uuids = {}
-#       with open('/run/blkid/blkid.tab', encoding='utf8') as fh:
-#           # sample: <device ... TYPE="vfat"
-#           #   PARTUUID="25d2dea1-9f68-1644-91dd-4836c0b3a30a">/dev/nvme0n1p1</device>
-#           for xml_line in fh:
-#               element = ET.fromstring(xml_line)
-#               if 'PARTUUID' in element.attrib:
-#                   device=element.text.strip()
-#                   name = self.mounts.get(device, device)
-#                   uuids[element.attrib['PARTUUID'].lower()] = name
-#       return uuids
-
         uuids = {}
         partuuid_path = '/dev/disk/by-partuuid/'
 
@@ -111,6 +100,8 @@ class EfiBootDude:
             if os.path.islink(full_path):
                 device_path = os.path.realpath(full_path)
                 uuids[entry] = device_path
+                if device_path in self.mounts:
+                    uuids[entry] = self.mounts[device_path]
         return uuids
 
     @staticmethod
@@ -118,7 +109,6 @@ class EfiBootDude:
         """ Find uuid string in a line """
         # Define the regex pattern for UUID (e.g., 25d2dea1-9f68-1644-91dd-4836c0b3a30a)
         pattern = r'\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b'
-        # Search for the pattern in the line
         mats = re.findall(pattern, line, re.IGNORECASE)
         return mats
 
@@ -127,9 +117,11 @@ class EfiBootDude:
         # Define the command to run
         lines = []
         if self.testfile:
+            # if given a "testfile" (which should be just the
+            # raw output of 'efibootmgr'), then parse it
             with open(self.testfile, 'r', encoding='utf-8') as fh:
                 lines = fh.readlines()
-        else:
+        else: # run efibootmgr
             command = 'efibootmgr'.split()
             result = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=True)
             lines = result.stdout.splitlines()
@@ -230,6 +222,17 @@ class EfiBootDude:
         words = line.split(maxsplit=1)
         return words[0]
 
+    def reboot(self):
+        """ Reboot the machine """
+        Window.stop_curses()
+        os.system('clear; stty sane; (set -x; sudo reboot now)')
+
+        # NOTE: probably will not get here...
+        os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
+        self.reinit()
+        Window._start_curses()
+        self.win.pick_pos = self.boot_idx
+
     def write(self):
         """ Commit the changes. """
         if not self.mods.dirty:
@@ -271,8 +274,6 @@ class EfiBootDude:
         Window._start_curses()
         self.win.pick_pos = self.boot_idx
 
-
-
     def main_loop(self):
         """ TBD """
 
@@ -296,6 +297,7 @@ class EfiBootDude:
                     '   m - modify - modify the value'
                     '   w - write - write the changes',
                     '   ESC - abandon changes and re-read boot state',
+                    '   b - reboot the machine',
                 ]
                 for line in lines:
                     self.win.put_body(line)
@@ -356,6 +358,7 @@ class EfiBootDude:
                 actions['m'] = 'modify'
             if self.mods.dirty:
                 actions['w'] = 'write'
+            actions['b'] = 'boot'
 
         return actions
 
@@ -395,7 +398,7 @@ class EfiBootDude:
             return value
 
         if key in (ord('q'), ord('x')):
-            
+
             answer = 'y'
             if self.mods.dirty:
                 answer = self.win.answer(
@@ -471,7 +474,7 @@ class EfiBootDude:
         if key == ord('t') and ns.is_boot:
             seed = ns.label
             while True:
-                answer = self.win.answer(prompt='Enter new label or clear to abort',
+                answer = self.win.answer(prompt='Type new label or clear to abort',
                     seed=seed, width=80)
                 seed = answer = answer.strip()
                 if not answer:
@@ -485,7 +488,7 @@ class EfiBootDude:
         if key == 27:  # ESC
             if self.mods.dirty:
                 answer = self.win.answer(
-                    prompt='Enter "y" to clear edits and refresh')
+                    prompt='Type "y" to clear edits and refresh')
                 if answer.strip().lower().startswith('y'):
                     self.reinit()
             else:
@@ -496,13 +499,18 @@ class EfiBootDude:
             self.write()
             return None
 
-        # FIXME: handle more keys 
+        if key == ord('b'):
+            answer = self.win.answer(prompt='Type "reboot" to reboot',
+                    seed='reboot', width=80)
+            if answer.strip().lower().startswith('reboot'):
+                self.reboot()
+
+        # FIXME: handle more keys
         return None
 
 
 def main():
     """ The program """
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('testfile', nargs='?', default=None)
     opts = parser.parse_args()
