@@ -358,7 +358,8 @@ class EfiBootDude:
                 actions['m'] = 'modify'
             if self.mods.dirty:
                 actions['w'] = 'write'
-            actions['b'] = 'boot'
+            else:
+                actions['b'] = 'boot'
 
         return actions
 
@@ -500,6 +501,10 @@ class EfiBootDude:
             return None
 
         if key == ord('b'):
+            if self.mods.dirty:
+                self.win.alert('Pending changes (on return, use "w" to commit or "ESC" to discard)')
+                return
+            
             answer = self.win.answer(prompt='Type "reboot" to reboot',
                     seed='reboot', width=80)
             if answer.strip().lower().startswith('reboot'):

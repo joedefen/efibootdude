@@ -38,9 +38,12 @@ At this point
   active by typing `*` for the corresponding entries.
 * Press `ESC` key to abandon any changes and reload the boot information.
 * When ready to write the changes to the BIOS, enter `w`.
-* When the changes look good, type `b` to reboot, if you wish.
 * When writing the changes, `efibootdude` drops out of menu mode so you can
   verify the underlying commands, error codes, and error messages.
+* After you write changes, type `b` to reboot, if you wish and the boot menu looks OK.
+* BTW, the top-line keys vary per context; e.g.:
+  * `w` is only shown with pending changes, and
+  * `b` is only shown w/o pending changes.
 
 ## Caveats
 * Some operations may not work permanently even though there is no indication from `efibootmgr`

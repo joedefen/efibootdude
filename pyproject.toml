@@ -55,7 +55,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "efibootdude"
-version = "0.5"
+version = "0.5.1"
 description = "A visual wrapper for efibootmgr"
 authors = [
     { name = "Joe Defen", email = "joedef@duck.com" }
