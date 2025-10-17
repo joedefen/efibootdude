@@ -20,7 +20,7 @@ import traceback
 import curses as cs
 import argparse
 # import xml.etree.ElementTree as ET
-from efibootdude.PowerWindow import Window, OptionSpinner
+from console_window import ConsoleWindow, OptionSpinner
 
 
 class EfiBootDude:
@@ -52,7 +52,7 @@ class EfiBootDude:
         self.digests, self.width1, self.label_wid, self.boot_idx = [], 0, 0, 0
         self.win = None
         self.reinit()
-        self.win = Window(head_line=True, body_rows=len(self.digests)+20, head_rows=10,
+        self.win = ConsoleWindow(head_line=True, body_rows=len(self.digests)+20, head_rows=10,
                           keys=spin.keys ^ other_keys, mod_pick=self.mod_pick)
         self.win.pick_pos = self.boot_idx
 
@@ -224,13 +224,13 @@ class EfiBootDude:
 
     def reboot(self):
         """ Reboot the machine """
-        Window.stop_curses()
+        ConsoleWindow.stop_curses()
         os.system('clear; stty sane; (set -x; sudo reboot now)')
 
         # NOTE: probably will not get here...
         os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
         self.reinit()
-        Window._start_curses()
+        ConsoleWindow._start_curses()
         self.win.pick_pos = self.boot_idx
 
     def write(self):
@@ -255,7 +255,7 @@ class EfiBootDude:
             cmds.append(f'{prefix} --bootnext {self.mods.next}')
         if self.mods.timeout:
             cmds.append(f'{prefix} --timeout {self.mods.timeout}')
-        Window.stop_curses()
+        ConsoleWindow.stop_curses()
         os.system('clear; stty sane')
         print('Commands:')
         for cmd in cmds:
@@ -271,7 +271,7 @@ class EfiBootDude:
             os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
             self.reinit()
 
-        Window._start_curses()
+        ConsoleWindow._start_curses()
         self.win.pick_pos = self.boot_idx
 
     def main_loop(self):
@@ -530,7 +530,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         pass
     except Exception as exce:
-        Window.stop_curses()
+        ConsoleWindow.stop_curses()
         print("exception:", str(exce))
         print(traceback.format_exc())
 #       if dump_str:

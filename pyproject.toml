@@ -20,6 +20,7 @@ classifiers = [
 ]
 dependencies = [
     'importlib-metadata; python_version<"3.8"',
+    'console-window >= 1.0.0',
 ]
 
 [project.urls]
