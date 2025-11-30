@@ -123,6 +123,13 @@ class EfiBootDude:
                     )
         self.digests, self.width1, self.label_wid, self.boot_idx = [], 0, 0, 0
         self.digest_boots()
+
+        # Save original state for detecting actual changes
+        self.original_order = [ns.ident for ns in self.digests if ns.is_boot]
+        self.original_actives = {ns.ident for ns in self.digests if ns.is_boot and ns.active}
+        self.original_timeout = next((ns.label for ns in self.digests if ns.ident == 'Timeout:'), None)
+        self.original_next = next((ns.label for ns in self.digests if ns.ident == 'BootNext:'), None)
+
         if self.win:
             self.win.pick_pos = self.boot_idx
 
@@ -218,6 +225,49 @@ class EfiBootDude:
 
         self.digests = rv
         return rv
+
+    def update_dirty_state(self):
+        """Recalculate dirty flag based on actual changes from original state"""
+        # Check if boot order actually changed
+        current_order = [ns.ident for ns in self.digests if ns.is_boot]
+        order_changed = (self.mods.order and current_order != self.original_order)
+
+        # Check if active states actually changed
+        current_actives = {ns.ident for ns in self.digests if ns.is_boot and ns.active}
+        # Active state changed if we have pending changes that would alter the state
+        actives_changed = bool(self.mods.actives or self.mods.inactives)
+        if actives_changed:
+            # Simulate what the actives would be after applying changes
+            simulated_actives = current_actives.copy()
+            simulated_actives.update(self.mods.actives)
+            simulated_actives.difference_update(self.mods.inactives)
+            actives_changed = simulated_actives != self.original_actives
+
+        # Check timeout - compare the numeric value, not the label format
+        timeout_changed = False
+        if self.mods.timeout is not None:
+            # Extract original timeout value (e.g., "2 seconds" -> "2")
+            original_timeout_val = self.original_timeout.split()[0] if self.original_timeout else None
+            timeout_changed = self.mods.timeout != original_timeout_val
+
+        # Check next boot
+        next_changed = False
+        if self.mods.next is not None:
+            next_changed = self.mods.next != self.original_next
+
+        # Check removals and tag changes
+        removals_changed = bool(self.mods.removes)
+        tags_changed = bool(self.mods.tags)
+
+        # Update dirty flag
+        self.mods.dirty = (
+            order_changed or
+            actives_changed or
+            timeout_changed or
+            next_changed or
+            removals_changed or
+            tags_changed
+        )
 
     @staticmethod
     def check_preqreqs():
@@ -316,10 +366,11 @@ class EfiBootDude:
 #                   '   c - copy - copy boot entry',
                     '   r - remove - remove boot',
 #                   '   a - add - add boot entry',
-                    '   n - next - set next boot default',
+                    '   n - next - set next boot default (on boot entry)',
+                    '   n - cycle - cycle through boot entries (on BootNext line)',
                     '   t - tag - set a new label for the boot entry',
                     '   * - toggle whether entry is active'
-                    '   m - modify - modify the value'
+                    '   m - modify - modify the value (on Timeout line)'
                     '   w - write - write the changes',
                     '   ESC - abandon changes and re-read boot state',
                     '   b - reboot the machine',
@@ -359,6 +410,9 @@ class EfiBootDude:
                     line = f'{ns.active:>1} {ns.ident:>4} {ns.label:<{self.label_wid}}'
                     line += f' {info1:<{self.width1}} {info2}'
                     self.win.add_body(line)
+
+            # Update dirty state before rendering to reflect actual changes
+            self.update_dirty_state()
             self.win.render()
 
             _ = self.do_key(self.win.prompt(seconds=300))
@@ -374,6 +428,7 @@ class EfiBootDude:
             else:
                 line += f' {key}:{verb}'
         # or EXPAND
+        line += ' v:' + ('terse' if self.opts.verbose else 'verbose')
         line += ' ?:help quit'
         # for action in self.actions:
             # line += f' {action[0]}:{action}'
@@ -397,6 +452,8 @@ class EfiBootDude:
                 actions['n'] = 'next'
                 actions['t'] = 'tag'
                 actions['*'] = 'inact' if ns.active else 'act'
+            elif ns.ident == 'BootNext:':
+                actions['n'] = 'cycle'
             elif ns.ident in ('Timeout:', ):
                 actions['m'] = 'modify'
             if self.mods.dirty:
@@ -468,7 +525,6 @@ class EfiBootDude:
                     if re.match(r'\d+$', answer):
                         ns.label = f'{answer} seconds'
                         self.mods.timeout = answer
-                        self.mods.dirty = True
                         break
             return None
 
@@ -478,7 +534,6 @@ class EfiBootDude:
                 digests[pos-1], digests[pos] = digests[pos], digests[pos-1]
                 self.win.pick_pos -= 1
                 self.mods.order = True
-                self.mods.dirty = True
             return None
         if key == ord('d') and ns.is_boot:
             digests, pos = self.digests, self.win.pick_pos
@@ -486,7 +541,6 @@ class EfiBootDude:
                 digests[pos+1], digests[pos] = digests[pos], digests[pos+1]
                 self.win.pick_pos += 1
                 self.mods.order = True
-                self.mods.dirty = True
             return None
         if key == ord('r') and ns.is_boot:
             ident = self.digests[self.win.pick_pos].ident
@@ -494,14 +548,40 @@ class EfiBootDude:
             self.mods.removes.add(ident)
             self.mods.actives.discard(ident)
             self.mods.inactives.discard(ident)
-            self.mods.dirty = True
             return None
-        if key == ord('n') and ns.is_boot:
-            ident = ns.ident
-            self.digests[0].label = ident
-            self.mods.next = ident
-            self.mods.dirty = True
-            return None
+        if key == ord('n'):
+            if ns.ident == 'BootNext:':
+                # Cycle through boot entries when on BootNext line
+                boot_entries = [b.ident for b in self.digests if b.is_boot]
+                if not boot_entries:
+                    return None
+
+                current = ns.label
+                # Determine next entry to cycle to
+                if current == self.original_next or current == '---':
+                    # Start with first boot entry
+                    next_ident = boot_entries[0]
+                elif current in boot_entries:
+                    # Find current in list and move to next (or wrap to original)
+                    idx = boot_entries.index(current)
+                    if idx + 1 < len(boot_entries):
+                        next_ident = boot_entries[idx + 1]
+                    else:
+                        # Wrap back to original
+                        next_ident = self.original_next
+                else:
+                    # Unknown state, start over
+                    next_ident = boot_entries[0]
+
+                ns.label = next_ident
+                self.mods.next = next_ident if next_ident != self.original_next else None
+                return None
+            elif ns.is_boot:
+                # Set this boot entry as next
+                ident = ns.ident
+                self.digests[0].label = ident
+                self.mods.next = ident
+                return None
 
         if key == ord('*') and ns.is_boot:
             ident = ns.ident
@@ -513,7 +593,6 @@ class EfiBootDude:
                 ns.active = '*'
                 self.mods.actives.add(ident)
                 self.mods.inactives.discard(ident)
-            self.mods.dirty = True
 
         if key == ord('t') and ns.is_boot:
             seed = ns.label
@@ -526,7 +605,6 @@ class EfiBootDude:
                 if re.match(r'([\w\s])+$', answer):
                     ns.label = f'{answer}'
                     self.mods.tags[ns.ident] = answer
-                    self.mods.dirty = True
                     break
 
         if key == 27:  # ESC
