@@ -14,7 +14,7 @@ boot menu and parameters while running Linux.
 * setting boot entries active or inactive, and
 * setting the boot menu timeout value (until it boots the default entry).
 
-To be sure, there are many other esoteric uses of `efibootmanager` including adding
+To be sure, there are many other esoteric uses of `efibootmgr` including adding
 a new boot entry; for such needs, just use `efibootmgr` directly.
   
 ## Usage

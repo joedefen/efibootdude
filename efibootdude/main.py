@@ -23,6 +23,55 @@ import argparse
 from console_window import ConsoleWindow, OptionSpinner
 
 
+class SystemInfo:
+    """Gather system information about mounts and partitions"""
+
+    def __init__(self):
+        self.mounts = self.get_mounts()
+        self.uuids = self.get_part_uuids()
+
+    @staticmethod
+    def get_mounts():
+        """Get a dictionary of device-to-mount-point"""
+        mounts = {}
+        with open('/proc/mounts', 'r', encoding='utf-8') as mounts_file:
+            for line in mounts_file:
+                parts = line.split()
+                dev = parts[0]
+                mount_point = parts[1]
+                mounts[dev] = mount_point
+        return mounts
+
+    def get_part_uuids(self):
+        """Get all the Partition UUIDs"""
+        uuids = {}
+        partuuid_path = '/dev/disk/by-partuuid/'
+
+        if not os.path.exists(partuuid_path):
+            return uuids
+        for entry in os.listdir(partuuid_path):
+            full_path = os.path.join(partuuid_path, entry)
+            if os.path.islink(full_path):
+                device_path = os.path.realpath(full_path)
+                uuids[entry] = device_path
+                if device_path in self.mounts:
+                    uuids[entry] = self.mounts[device_path]
+        return uuids
+
+    @staticmethod
+    def extract_uuids(line):
+        """Find uuid string in a line"""
+        # Define the regex pattern for UUID (e.g., 25d2dea1-9f68-1644-91dd-4836c0b3a30a)
+        pattern = r'\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b'
+        mats = re.findall(pattern, line, re.IGNORECASE)
+        return mats
+
+    def refresh(self):
+        """Refresh system information"""
+        self.mounts = self.get_mounts()
+        self.uuids = self.get_part_uuids()
+
+
 class EfiBootDude:
     """ Main class for curses atop efibootmgr"""
     singleton = None
@@ -47,19 +96,20 @@ class EfiBootDude:
 
         self.actions = {} # currently available actions
         self.check_preqreqs()
-        self.mounts, self.uuids = {}, {}
+        self.sysinfo = SystemInfo()
         self.mods = SimpleNamespace()
         self.digests, self.width1, self.label_wid, self.boot_idx = [], 0, 0, 0
+        self.saved_pick_pos = None  # Save cursor position when entering help mode
         self.win = None
         self.reinit()
         self.win = ConsoleWindow(head_line=True, body_rows=len(self.digests)+20, head_rows=10,
                           keys=spin.keys ^ other_keys, mod_pick=self.mod_pick)
-        self.win.pick_pos = self.boot_idx
+        self.win.pick_pos = self.boot_idx  # Start at first boot entry
+        self.win.set_pick_mode(True)  # Start in pick mode
 
     def reinit(self):
         """ RESET EVERYTHING"""
-        self.mounts = self.get_mounts()
-        self.uuids = self.get_part_uuids() # uuid in lower case
+        self.sysinfo.refresh()
         self.mods = SimpleNamespace(
                     dirty=False, # if anything changed
                     order=False,
@@ -75,42 +125,6 @@ class EfiBootDude:
         self.digest_boots()
         if self.win:
             self.win.pick_pos = self.boot_idx
-
-    @staticmethod
-    def get_mounts():
-        """ Get a dictionary of device-to-mount-point """
-        mounts = {}
-        with open('/proc/mounts', 'r', encoding='utf-8') as mounts_file:
-            for line in mounts_file:
-                parts = line.split()
-                dev = parts[0]
-                mount_point = parts[1]
-                mounts[dev] = mount_point
-        return mounts
-
-    def get_part_uuids(self):
-        """ Get all the Partition UUIDS"""
-        uuids = {}
-        partuuid_path = '/dev/disk/by-partuuid/'
-
-        if not os.path.exists(partuuid_path):
-            return uuids
-        for entry in os.listdir(partuuid_path):
-            full_path = os.path.join(partuuid_path, entry)
-            if os.path.islink(full_path):
-                device_path = os.path.realpath(full_path)
-                uuids[entry] = device_path
-                if device_path in self.mounts:
-                    uuids[entry] = self.mounts[device_path]
-        return uuids
-
-    @staticmethod
-    def extract_uuids(line):
-        """ Find uuid string in a line """
-        # Define the regex pattern for UUID (e.g., 25d2dea1-9f68-1644-91dd-4836c0b3a30a)
-        pattern = r'\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b'
-        mats = re.findall(pattern, line, re.IGNORECASE)
-        return mats
 
     def digest_boots(self):
         """ Digest the output of 'efibootmgr'."""
@@ -176,10 +190,10 @@ class EfiBootDude:
                 start, end = mat.span()
                 other = other[:start] + other[end:]
 
-            uuids = self.extract_uuids(other)
+            uuids = SystemInfo.extract_uuids(other)
             for uuid in uuids:
-                if uuid and uuid in self.uuids:
-                    device = self.uuids[uuid]
+                if uuid and uuid in self.sysinfo.uuids:
+                    device = self.sysinfo.uuids[uuid]
                     break
 
             if device:
@@ -232,6 +246,7 @@ class EfiBootDude:
         self.reinit()
         ConsoleWindow._start_curses()
         self.win.pick_pos = self.boot_idx
+        return None
 
     def write(self):
         """ Commit the changes. """
@@ -279,8 +294,18 @@ class EfiBootDude:
 
         self.opts.name = "[hit 'n' to enter name]"
         while True:
-            if self.opts.help_mode:
+            # Handle transitions into/out of help mode
+            if self.opts.help_mode and self.saved_pick_pos is None:
+                # Entering help mode - save cursor position and disable pick mode
+                self.saved_pick_pos = self.win.pick_pos
                 self.win.set_pick_mode(False)
+            elif not self.opts.help_mode and self.saved_pick_pos is not None:
+                # Exiting help mode - restore cursor position and enable pick mode
+                self.win.pick_pos = self.saved_pick_pos
+                self.saved_pick_pos = None
+                self.win.set_pick_mode(True)
+
+            if self.opts.help_mode:
                 self.spin.show_help_nav_keys(self.win)
                 self.spin.show_help_body(self.win)
                 # FIXME: keys
@@ -303,18 +328,36 @@ class EfiBootDude:
                     self.win.put_body(line)
             else:
                 # self.win.set_pick_mode(self.opts.pick_mode, self.opts.pick_size)
-                self.win.set_pick_mode(True)
+                pass  # pick mode already set in transition logic above
                 self.win.add_header(self.get_keys_line(), attr=cs.A_BOLD)
                 for ns in self.digests:
                     info1 = ns.info1
+                    info2 = ns.info2
                     if not self.opts.verbose:
+                        # Clean up firmware volume references (BIOS internal apps)
+                        info1 = re.sub(r'FvVol\([^)]+\)/FvFile\([^)]+\)', '[Firmware]', info1)
+                        info2 = re.sub(r'FvVol\([^)]+\)/FvFile\([^)]+\)', '[Firmware]', info2)
+
+                        # Clean up PCI device paths for auto-created entries
+                        if '{auto_created_boot_option}' in info1:
+                            info1 = re.sub(r'PciRoot\([^{]+', '', info1)
+                            info1 = info1.replace('{auto_created_boot_option}', '[Auto]')
+                        if '{auto_created_boot_option}' in info2:
+                            info2 = re.sub(r'PciRoot\([^{]+', '', info2)
+                            info2 = info2.replace('{auto_created_boot_option}', '[Auto]')
+
+                        # Clean up vendor hardware/messaging paths
                         mat = re.search(r'/?VenHw\(.*$', info1, re.IGNORECASE)
                         if mat:
                             start, end = mat.span()
-                            info1 = info1[:start] + info1[end:]
+                            info1 = info1[:start] + '[Vendor HW]'
+                        mat = re.search(r'/?VenMsg\(.*$', info1, re.IGNORECASE)
+                        if mat:
+                            start, end = mat.span()
+                            info1 = info1[:start] + '[Vendor Msg]'
 
                     line = f'{ns.active:>1} {ns.ident:>4} {ns.label:<{self.label_wid}}'
-                    line += f' {info1:<{self.width1}} {ns.info2}'
+                    line += f' {info1:<{self.width1}} {info2}'
                     self.win.add_body(line)
             self.win.render()
 
@@ -503,12 +546,12 @@ class EfiBootDude:
         if key == ord('b'):
             if self.mods.dirty:
                 self.win.alert('Pending changes (on return, use "w" to commit or "ESC" to discard)')
-                return
-            
+                return None
+
             answer = self.win.answer(prompt='Type "reboot" to reboot',
                     seed='reboot', width=80)
             if answer.strip().lower().startswith('reboot'):
-                self.reboot()
+                return self.reboot()
 
         # FIXME: handle more keys
         return None
