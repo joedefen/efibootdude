@@ -14,8 +14,8 @@ import os
 import sys
 import re
 import shutil
-from types import SimpleNamespace
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 import subprocess
 import traceback
 import curses as cs
@@ -58,6 +58,30 @@ class BootEntry:
     label: str = ''
     info1: str = ''
     info2: str = ''
+
+
+@dataclass(**_dataclass_kwargs)
+class BootModifications:
+    """Tracks pending modifications to boot configuration.
+
+    Attributes:
+        dirty: True if any changes have been made
+        order: True if boot order has been modified
+        timeout: New timeout value in seconds, or None if unchanged
+        removes: Set of boot entry identifiers to remove
+        tags: Dict mapping boot entry identifiers to new labels
+        next: Boot entry identifier for next boot, or None if unchanged
+        actives: Set of boot entry identifiers to mark as active
+        inactives: Set of boot entry identifiers to mark as inactive
+    """
+    dirty: bool = False
+    order: bool = False
+    timeout: Optional[str] = None
+    removes: set = field(default_factory=set)
+    tags: dict = field(default_factory=dict)
+    next: Optional[str] = None
+    actives: set = field(default_factory=set)
+    inactives: set = field(default_factory=set)
 
 
 class SystemInfo:
@@ -134,7 +158,7 @@ class EfiBootDude:
         self.actions = {} # currently available actions
         self.check_preqreqs()
         self.sysinfo = SystemInfo()
-        self.mods = SimpleNamespace()
+        self.mods = BootModifications()
         self.digests, self.width1, self.label_wid, self.boot_idx = [], 0, 0, 0
         self.saved_pick_pos = None  # Save cursor position when entering help mode
         self.win = None
@@ -147,17 +171,7 @@ class EfiBootDude:
     def reinit(self):
         """ RESET EVERYTHING"""
         self.sysinfo.refresh()
-        self.mods = SimpleNamespace(
-                    dirty=False, # if anything changed
-                    order=False,
-                    timeout=None,
-                    removes=set(),
-                    tags={},
-#                   adds=set(),
-                    next=None,
-                    actives=set(),
-                    inactives=set(),
-                    )
+        self.mods = BootModifications()
         self.digests, self.width1, self.label_wid, self.boot_idx = [], 0, 0, 0
         self.digest_boots()
 
@@ -299,6 +313,45 @@ class EfiBootDude:
             tags_changed
         )
 
+    def format_boot_entry(self, entry: BootEntry) -> str:
+        """Format a boot entry for display, applying verbose/terse filtering.
+
+        Args:
+            entry: The BootEntry to format
+
+        Returns:
+            Formatted line for display
+        """
+        info1 = entry.info1
+        info2 = entry.info2
+
+        if not self.opts.verbose:
+            # Clean up firmware volume references (BIOS internal apps)
+            info1 = re.sub(r'FvVol\([^)]+\)/FvFile\([^)]+\)', '[Firmware]', info1)
+            info2 = re.sub(r'FvVol\([^)]+\)/FvFile\([^)]+\)', '[Firmware]', info2)
+
+            # Clean up PCI device paths for auto-created entries
+            if '{auto_created_boot_option}' in info1:
+                info1 = re.sub(r'PciRoot\([^{]+', '', info1)
+                info1 = info1.replace('{auto_created_boot_option}', '[Auto]')
+            if '{auto_created_boot_option}' in info2:
+                info2 = re.sub(r'PciRoot\([^{]+', '', info2)
+                info2 = info2.replace('{auto_created_boot_option}', '[Auto]')
+
+            # Clean up vendor hardware/messaging paths
+            mat = re.search(r'/?VenHw\(.*$', info1, re.IGNORECASE)
+            if mat:
+                start, _ = mat.span()
+                info1 = info1[:start] + '[Vendor HW]'
+            mat = re.search(r'/?VenMsg\(.*$', info1, re.IGNORECASE)
+            if mat:
+                start, _ = mat.span()
+                info1 = info1[:start] + '[Vendor Msg]'
+
+        line = f'{entry.active:>1} {entry.ident:>4} {entry.label:<{self.label_wid}}'
+        line += f' {info1:<{self.width1}} {info2}'
+        return line
+
     @staticmethod
     def check_preqreqs():
         """ Check that needed programs are installed. """
@@ -411,34 +464,8 @@ class EfiBootDude:
                 # self.win.set_pick_mode(self.opts.pick_mode, self.opts.pick_size)
                 pass  # pick mode already set in transition logic above
                 self.win.add_header(self.get_keys_line(), attr=cs.A_BOLD)
-                for ns in self.digests:
-                    info1 = ns.info1
-                    info2 = ns.info2
-                    if not self.opts.verbose:
-                        # Clean up firmware volume references (BIOS internal apps)
-                        info1 = re.sub(r'FvVol\([^)]+\)/FvFile\([^)]+\)', '[Firmware]', info1)
-                        info2 = re.sub(r'FvVol\([^)]+\)/FvFile\([^)]+\)', '[Firmware]', info2)
-
-                        # Clean up PCI device paths for auto-created entries
-                        if '{auto_created_boot_option}' in info1:
-                            info1 = re.sub(r'PciRoot\([^{]+', '', info1)
-                            info1 = info1.replace('{auto_created_boot_option}', '[Auto]')
-                        if '{auto_created_boot_option}' in info2:
-                            info2 = re.sub(r'PciRoot\([^{]+', '', info2)
-                            info2 = info2.replace('{auto_created_boot_option}', '[Auto]')
-
-                        # Clean up vendor hardware/messaging paths
-                        mat = re.search(r'/?VenHw\(.*$', info1, re.IGNORECASE)
-                        if mat:
-                            start, end = mat.span()
-                            info1 = info1[:start] + '[Vendor HW]'
-                        mat = re.search(r'/?VenMsg\(.*$', info1, re.IGNORECASE)
-                        if mat:
-                            start, end = mat.span()
-                            info1 = info1[:start] + '[Vendor Msg]'
-
-                    line = f'{ns.active:>1} {ns.ident:>4} {ns.label:<{self.label_wid}}'
-                    line += f' {info1:<{self.width1}} {info2}'
+                for entry in self.digests:
+                    line = self.format_boot_entry(entry)
                     self.win.add_body(line)
 
             # Update dirty state before rendering to reflect actual changes
