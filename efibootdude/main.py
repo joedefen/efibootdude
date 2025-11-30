@@ -15,12 +15,49 @@ import sys
 import re
 import shutil
 from types import SimpleNamespace
+from dataclasses import dataclass
 import subprocess
 import traceback
 import curses as cs
 import argparse
 # import xml.etree.ElementTree as ET
 from console_window import ConsoleWindow, OptionSpinner
+
+# Use slots for memory efficiency and typo protection on Python 3.10+
+_dataclass_kwargs = {'slots': True} if sys.version_info >= (3, 10) else {}
+
+@dataclass(**_dataclass_kwargs)
+class BootEntry:
+    """Represents a boot entry or system info line from efibootmgr.
+
+    Attributes:
+        ident: Boot entry identifier (e.g., '0007') or system field name
+               (e.g., 'BootNext:', 'Timeout:', 'BootCurrent:')
+        is_boot: True if this is an actual boot entry (vs system info line)
+        active: '*' if boot entry is active/enabled, '' otherwise
+        label: Human-readable label (e.g., 'Ubuntu', '2 seconds', '0007')
+        info1: Primary info - mount point/device (e.g., '/boot/efi', '/dev/nvme0n1p1')
+               or firmware path for BIOS entries
+        info2: Secondary info - EFI path (e.g., '\\EFI\\ubuntu\\shimx64.efi')
+               or additional device information
+
+    Examples:
+        Boot entry:    ident='0007', is_boot=True, active='*',
+                      label='Ubuntu', info1='/boot/efi',
+                      info2='\\EFI\\ubuntu\\shimx64.efi'
+
+        System info:   ident='Timeout:', is_boot=False, active='',
+                      label='2 seconds', info1='', info2=''
+
+        Next boot:     ident='BootNext:', is_boot=False, active='',
+                      label='0007' (or '---'), info1='', info2=''
+    """
+    ident: str
+    is_boot: bool = False
+    active: str = ''
+    label: str = ''
+    info1: str = ''
+    info2: str = ''
 
 
 class SystemInfo:
@@ -160,14 +197,7 @@ class EfiBootDude:
                 boot_order = info
                 continue
 
-            ns = SimpleNamespace(
-                ident=None,
-                is_boot=False,
-                active='',
-                label='',
-                info1='',
-                info2='',
-            )
+            ns = BootEntry(ident='')
 
             mat = re.match(r'\bBoot([0-9a-f]+)\b(\*?)' # Boot0024*
                            + r'\s+(\S.*\S|\S)\s*\t' # Linux Boot Manager
