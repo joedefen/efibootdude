@@ -1,55 +1,64 @@
 # EfiBootDude
-`efibootdude` presents a visual (curses) interface to `efibootmgr` which allows editing the bios
-boot menu and parameters while running Linux.
+`efibootdude` presents a visual (curses) interface to `efibootmgr` which allows editing the bios boot menu and parameters while running Linux.
 
 * Install `efibootdude` using `pipx install efibootdude`, or however you do so.
 * Prerequisites: install [rhboot/efibootmgr](https://github.com/rhboot/efibootmgr)
   * For example, on a Debian derived distro, use `sudo apt install efibootmgr`.
 
 
-`efibootdude` covers only the most commonly used capabilities of `efibootmgr` including:
-* reordering boot entries,
-* removing boot entries,
-* setting the boot entry for the next boot only,
-* setting boot entries active or inactive, and
-* setting the boot menu timeout value (until it boots the default entry).
+`efibootdude` covers the most commonly used capabilities of `efibootmgr`; you can:
 
-To be sure, there are many other esoteric uses of `efibootmgr` including adding
-a new boot entry; for such needs, just use `efibootmgr` directly.
+* reorder, enable/disable, copy, and remove boot entries
+* choose what to boot on the next reboot (BootNext)
+* set the timeout before auto-booting
+* save your changes and reboot
+
+Note: Copying a boot entry effectively adds a new entry with a different label. For more esoteric uses of `efibootmgr` (like setting custom boot variables), use `efibootmgr` directly.
   
 ## Usage
 After running `efibootdude` and making some changes, you'll see a screen comparable to this:
+```
+ wRITE down next tag *:inact copy rmv v:verbose ?:help quit
+──────────────────────────────────────────────────────────────────────────────
+   BootNext: ---
+   BootCurrent: 0007
+   Timeout: 2 seconds
+>* 0006 Linux Boot Manager               /dev/nvme0n1p1 \EFI\systemd\systemd-b
+ * 0000 Enter Setup                      [Firmware]
+ * 0001 NVMe: SAMSUNG MZALQ128HBHQ-000L2 [Auto]
+ * 0002 UEFI Shell                       [Firmware]
+   +ADD Linux Boot Manager Copy          [pending copy]
+ * -RMV Ubuntu                           /boot/efi      \EFI\ubuntu\shimx64.ef
 
-![efibootdude-screenshot](https://github.com/joedefen/efibootdude/blob/main/images/efibootdude-screenshot.png?raw=true).
-
+```
 At this point
 * The "current" line starts with `>` and is highlighted.
-* The top line shows actions for the current line; type the underscored letter
-  to effect its action.
+* The top line shows actions for the current line; type the underscored letter to effect its action.
 * Type `?` for a more complete explanation of the keys, navigation keys, etc.
   * **ALWAYS** view the help at least once if unfamiliar with this tool,
     it navigation, and/or uncertain of keys not shown on top line.
 * With this current line, we can:
   * Type `u` or `d` to move it up or down in the boot order.
   * Type `t` to relabel the boot entry.
+  * Type `c` to copy the boot entry with a new label.
   * Type `r` to remove the boot entry.
   * And so forth.
 * The entries with `*` on the left are active boot entries; toggle whether
   active by typing `*` for the corresponding entries.
+* Special indicators:
+  * `+ADD` shows pending copy operations (press `r` to cancel before writing)
+  * `-RMV` shows entries marked for removal (press `r` to undo before writing)
 * Press `ESC` key to abandon any changes and reload the boot information.
 * When ready to write the changes to the BIOS, enter `w`.
-* When writing the changes, `efibootdude` drops out of menu mode so you can
-  verify the underlying commands, error codes, and error messages.
+* When writing the changes, `efibootdude` drops out of menu mode so you can verify the underlying commands, error codes, and error messages.
 * After you write changes, type `b` to reboot, if you wish and the boot menu looks OK.
 * BTW, the top-line keys vary per context; e.g.:
   * `w` is only shown with pending changes, and
   * `b` is only shown w/o pending changes.
 
-## Caveats
-* Some operations may not work permanently even though there is no indication from `efibootmgr`
-  (e.g., on my desktop, I cannot re-label boot entries).
-* Some operations may only work (again) after re-booting (e.g., you might find activating
-  an entry does not work, but it does so after a reboot).
+## Caveats - BIOSes Vary in What They Implement Correctly
+* Some operations may not work permanently even though there is no indication from `efibootmgr` (e.g., on my desktop, I cannot re-label boot entries); copy an entry and later remove the old one as a safe workaround.
+* Some operations may only work (again) after re-booting (e.g., you might find activating an entry does not work, but it does so after a reboot).
 
 ## About this Project
 This project was inspired by [Elinvention/efiboots](https://github.com/Elinvention/efiboots). Relative to that project, the aims of `efibootdude` are:

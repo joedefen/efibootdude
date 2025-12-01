@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "efibootdude"
-version = "0.5.3"
+version = "1.0.0"
 description = "A visual wrapper for efibootmgr"
 authors = [
     { name = "Joe Defen", email = "joedef@duck.com" }

@@ -1,7 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Interactive, visual thin layer atop efibootmgr
+efibootdude - Interactive TUI wrapper for efibootmgr
+
+A curses-based text user interface for managing UEFI boot entries.
+Provides visual feedback and undo capabilities for common efibootmgr operations.
+
+Architecture:
+    - BootEntry: Dataclass representing a single boot entry or system info line
+    - BootModifications: Dataclass tracking all pending changes (dirty state)
+    - SystemInfo: Discovers system mounts and partition UUIDs
+    - EfiBootDude: Main application class managing the TUI and state
+
+Key Features:
+    - Visual boot entry ordering with up/down movement
+    - Toggle boot entry active/inactive state
+    - Set next boot (BootNext)
+    - Modify timeout and entry labels
+    - Undoable remove (entries marked -RMV, restorable until committed)
+    - Smart dirty detection (knows when changes are undone)
+    - Verbose/terse mode for firmware path display
+
+Workflow:
+    1. Parse efibootmgr output into BootEntry objects
+    2. Display in curses TUI with context-sensitive actions
+    3. Track modifications in BootModifications
+    4. Generate and execute efibootmgr commands on write
 """
 # pylint: disable=broad-exception-caught,consider-using-with
 # pylint: disable=too-many-instance-attributes,too-many-branches
@@ -42,6 +66,8 @@ class BootEntry:
         info2: Secondary info - EFI path (e.g., '\\EFI\\ubuntu\\shimx64.efi')
                or additional device information
         removed: True if this boot entry is marked for removal
+        raw_device: Raw device string from efibootmgr (for copy operation)
+                    e.g., 'HD(1,GPT,uuid,...)\\File(\\EFI\\ubuntu\\shimx64.efi)'
 
     Examples:
         Boot entry:    ident='0007', is_boot=True, active='*',
@@ -61,6 +87,8 @@ class BootEntry:
     info1: str = ''
     info2: str = ''
     removed: bool = False
+    raw_device: str = ''
+    pending_copy: bool = False
 
 
 @dataclass(**_dataclass_kwargs)
@@ -76,6 +104,7 @@ class BootModifications:
         next: Boot entry identifier for next boot, or None if unchanged
         actives: Set of boot entry identifiers to mark as active
         inactives: Set of boot entry identifiers to mark as inactive
+        copies: List of (label, raw_device) tuples for new boot entries to create
     """
     dirty: bool = False
     order: bool = False
@@ -85,10 +114,24 @@ class BootModifications:
     next: Optional[str] = None
     actives: set = field(default_factory=set)
     inactives: set = field(default_factory=set)
+    copies: list = field(default_factory=list)
 
 
 class SystemInfo:
-    """Gather system information about mounts and partitions"""
+    """Gather system information about mounts and partitions.
+
+    Discovers partition UUIDs and maps them to mount points, enabling
+    the TUI to display human-readable paths instead of cryptic UUIDs.
+
+    This mapping allows converting efibootmgr output like:
+        HD(1,GPT,abc123-def4-5678-90ab-cdef12345678,0x800,0x100000)
+    Into user-friendly display:
+        /boot/efi or /dev/nvme0n1p1
+
+    Attributes:
+        mounts: Dict mapping device paths to mount points (e.g., '/dev/sda1' -> '/boot/efi')
+        uuids: Dict mapping partition UUIDs to (device, mount_point) tuples
+    """
 
     def __init__(self):
         self.mounts = self.get_mounts()
@@ -107,7 +150,16 @@ class SystemInfo:
         return mounts
 
     def get_part_uuids(self):
-        """Get all the Partition UUIDs"""
+        """Get all partition UUIDs and map them to device paths or mount points.
+
+        This is the key translation layer that makes boot entries readable:
+        1. Read symlinks from /dev/disk/by-partuuid/
+        2. Resolve each symlink to actual device (e.g., /dev/nvme0n1p1)
+        3. If device is mounted, use mount point instead (e.g., /boot/efi)
+
+        Returns:
+            Dict mapping UUID strings to either mount points (preferred) or device paths
+        """
         uuids = {}
         partuuid_path = '/dev/disk/by-partuuid/'
 
@@ -118,6 +170,7 @@ class SystemInfo:
             if os.path.islink(full_path):
                 device_path = os.path.realpath(full_path)
                 uuids[entry] = device_path
+                # Prefer mount point over device path if available
                 if device_path in self.mounts:
                     uuids[entry] = self.mounts[device_path]
         return uuids
@@ -137,7 +190,26 @@ class SystemInfo:
 
 
 class EfiBootDude:
-    """ Main class for curses atop efibootmgr"""
+    """Main TUI application for managing UEFI boot entries.
+
+    This class orchestrates the entire application:
+    - Parses efibootmgr output into BootEntry objects
+    - Manages the curses-based UI with ConsoleWindow
+    - Tracks modifications with BootModifications
+    - Handles user input and updates state
+    - Generates and executes efibootmgr commands
+
+    Key Instance Variables:
+        boot_entries: List of BootEntry objects (current state)
+        original_entries: Deep copy of boot_entries at load time (for undo detection)
+        mods: BootModifications tracking all pending changes
+        sysinfo: SystemInfo instance for UUID/mount mapping
+        win: ConsoleWindow instance managing the curses UI
+        spin: OptionSpinner managing toggle and action keys
+        boot_idx: Index of first boot entry in boot_entries list
+
+    Singleton pattern ensures only one instance manages the TUI.
+    """
     singleton = None
 
     def __init__(self, testfile=None):
@@ -153,6 +225,7 @@ class EfiBootDude:
         spin.add_key('up', 'u - move boot entry up', category='action')
         spin.add_key('down', 'd - move boot entry down', category='action')
         spin.add_key('remove', 'r - remove boot entry', category='action')
+        spin.add_key('copy', 'c - copy boot entry with new label', category='action')
         spin.add_key('next', 'n - set next boot to boot entry OR cycle its values', category='action')
         spin.add_key('star', '* - toggle whether entry is active', category='action')
         spin.add_key('tag', 't - set a new label for the boot entry', category='action')
@@ -245,6 +318,7 @@ class EfiBootDude:
             label_wid = max(label_wid, len(ns.label))
             other = mat.group(4)
 
+            # Extract EFI path (e.g., \EFI\ubuntu\shimx64.efi) from the boot entry
             pat = r'(?:/?\b\w*\(|/)(\\[^/()]+)(?:$|[()/])'
             mat = re.search(pat, other, re.IGNORECASE)
             device, subpath = '', '' # e.g., /boot/efi, \EFI\UBUNTU\SHIMX64.EFI
@@ -253,11 +327,19 @@ class EfiBootDude:
                 start, end = mat.span()
                 other = other[:start] + other[end:]
 
+            # Critical UUID translation: Convert GPT partition UUIDs to readable paths
+            # Example: HD(1,GPT,abc123-...) -> /boot/efi (via sysinfo.uuids mapping)
             uuids = SystemInfo.extract_uuids(other)
             for uuid in uuids:
                 if uuid and uuid in self.sysinfo.uuids:
                     device = self.sysinfo.uuids[uuid]
                     break
+
+            # Store device and EFI path for copy operation (if both available)
+            # Device could be /boot/efi or /dev/nvme0n1p1
+            # Subpath is the .efi file like \EFI\ubuntu\shimx64.efi
+            if device and subpath:
+                ns.raw_device = f"{device}|{subpath.strip()}"
 
             if device:
                 ns.info1 = device
@@ -283,7 +365,13 @@ class EfiBootDude:
         return rv
 
     def update_dirty_state(self):
-        """Recalculate dirty flag based on actual changes from original state"""
+        """Recalculate dirty flag based on actual changes from original state.
+
+        Smart dirty detection: Detects when user undoes changes (e.g., moves entry
+        up then down, or toggles active twice). Uses deep copy of original_entries
+        to compare current state against initial state, not just tracking that
+        changes were made.
+        """
         # Extract original values from the deep copy
         original_order = [ns.ident for ns in self.original_entries if ns.is_boot]
         original_actives = {ns.ident for ns in self.original_entries if ns.is_boot and ns.active}
@@ -317,9 +405,10 @@ class EfiBootDude:
         if self.mods.next is not None:
             next_changed = self.mods.next != original_next
 
-        # Check removals and tag changes
+        # Check removals, tag changes, and copies
         removals_changed = bool(self.mods.removes)
         tags_changed = bool(self.mods.tags)
+        copies_changed = bool(self.mods.copies)
 
         # Update dirty flag
         self.mods.dirty = (
@@ -328,7 +417,8 @@ class EfiBootDude:
             timeout_changed or
             next_changed or
             removals_changed or
-            tags_changed
+            tags_changed or
+            copies_changed
         )
 
     def format_boot_entry(self, entry: BootEntry) -> str:
@@ -415,6 +505,32 @@ class EfiBootDude:
             cmds.append(f'{prefix} --inactive --bootnum {ident}')
         for ident, tag in self.mods.tags.items():
             cmds.append(f'{prefix} --bootnum {ident} --label "{tag}"')
+        for label, raw_device in self.mods.copies:
+            # Parse raw_device: "device|efi_path" e.g., "/boot/efi|\EFI\ubuntu\shimx64.efi"
+            if '|' in raw_device:
+                device_path, efi_path = raw_device.split('|', 1)
+                # Extract disk and partition from device path
+                # e.g., /dev/nvme0n1p1 -> disk=/dev/nvme0n1, part=1
+                # or /boot/efi -> need to find actual device from mounts
+                disk, part = None, None
+                if device_path.startswith('/dev/'):
+                    # Direct device path
+                    # Handle both NVMe (/dev/nvme0n1p3) and SATA/SCSI (/dev/sda3)
+                    mat = re.match(r'(/dev/(?:nvme\d+n\d+|[a-z]+))p?(\d+)$', device_path)
+                    if mat:
+                        disk, part = mat.group(1), mat.group(2)
+                else:
+                    # Mount point - reverse lookup to device
+                    for dev, mnt in self.sysinfo.mounts.items():
+                        if mnt == device_path:
+                            # Handle both NVMe (/dev/nvme0n1p3) and SATA/SCSI (/dev/sda3)
+                            mat = re.match(r'(/dev/(?:nvme\d+n\d+|[a-z]+))p?(\d+)$', dev)
+                            if mat:
+                                disk, part = mat.group(1), mat.group(2)
+                            break
+
+                if disk and part:
+                    cmds.append(f'{prefix} --create --disk {disk} --part {part} --label "{label}" --loader "{efi_path}"')
         if self.mods.order:
             orders = [ns.ident for ns in self.boot_entries if ns.is_boot and not ns.removed]
             orders = ','.join(orders)
@@ -471,9 +587,31 @@ class EfiBootDude:
                     self.win.put_body(line)
             else:
                 # self.win.set_pick_mode(self.opts.pick_mode, self.opts.pick_size)
-                pass  # pick mode already set in transition logic above
                 self.win.add_header(self.get_keys_line(), attr=cs.A_BOLD)
-                for entry in self.boot_entries:
+
+                # Build display list with pending copies injected before removed entries
+                self.display_entries = []
+                pending_copies_added = False
+                for i, entry in enumerate(self.boot_entries):
+                    # Insert pending copies just before first removed entry (or at end if none removed)
+                    if not pending_copies_added and self.mods.copies:
+                        if (entry.is_boot and entry.removed) or i == len(self.boot_entries) - 1:
+                            # Found first removed entry or last entry - insert pending copies before it
+                            for label, raw_device in self.mods.copies:
+                                copy_entry = BootEntry(
+                                    ident='+ADD',
+                                    label=label,
+                                    info1='[pending copy]',
+                                    pending_copy=True,
+                                    raw_device=raw_device
+                                )
+                                self.display_entries.append(copy_entry)
+                            pending_copies_added = True
+
+                    self.display_entries.append(entry)
+
+                # Render all entries
+                for entry in self.display_entries:
                     line = self.format_boot_entry(entry)
                     self.win.add_body(line)
 
@@ -503,14 +641,17 @@ class EfiBootDude:
 
     def get_actions(self):
         """ Determine the type of the current line and available commands."""
-        # FIXME: keys
         actions = {}
-        digests = self.boot_entries
+        # Use display_entries if available (includes pending copies), otherwise boot_entries
+        digests = getattr(self, 'display_entries', self.boot_entries)
         if 0 <= self.win.pick_pos < len(digests):
             boot_entry = digests[self.win.pick_pos]
             if self.mods.dirty:
                 actions['w'] = 'wRITE' # unusual case to indicate dirty
-            if boot_entry.is_boot:
+            # Pending copy entries: only allow removal
+            if boot_entry.pending_copy:
+                actions['r'] = 'cancel'
+            elif boot_entry.is_boot:
                 if not boot_entry.removed:
                     # Non-removed entry: can move up/down but not into removed section
                     if self.win.pick_pos > self.boot_idx:
@@ -522,8 +663,10 @@ class EfiBootDude:
                     actions['n'] = 'next'
                     actions['t'] = 'tag'
                     actions['*'] = 'inact' if boot_entry.active else 'act'
+                    # Copy only available if we have raw device info
+                    if boot_entry.raw_device:
+                        actions['c'] = 'copy'
                 # Removed entries: no up/down, no next, no tag, no toggle active
-#               actions['c'] = 'copy'
                 actions['r'] = 'unrmv' if boot_entry.removed else 'rmv'
 #               actions['a'] = 'add'
             elif boot_entry.ident == 'BootNext:':
@@ -634,7 +777,11 @@ class EfiBootDude:
             if answer.strip().lower().startswith('reboot'):
                 return self.reboot()
 
-        boot_entry = self.boot_entries[self.win.pick_pos]
+        # Use display_entries if available (includes pending copies)
+        digests = getattr(self, 'display_entries', self.boot_entries)
+        if self.win.pick_pos >= len(digests):
+            return None
+        boot_entry = digests[self.win.pick_pos]
 
         up, self.opts.up = self.opts.up, False
         if up and boot_entry.is_boot and not boot_entry.removed:
@@ -706,7 +853,19 @@ class EfiBootDude:
                 self.mods.inactives.discard(ident)
 
         remove, self.opts.remove = self.opts.remove, False
+        # Handle removal of pending copy entries
+        if remove and boot_entry.pending_copy:
+            # Remove from copies list by matching label and raw_device
+            for i, (label, raw_device) in enumerate(self.mods.copies):
+                if label == boot_entry.label and raw_device == boot_entry.raw_device:
+                    self.mods.copies.pop(i)
+                    break
+            return None
+
         if remove and boot_entry.is_boot:
+            # Undoable remove feature: Instead of deleting immediately, mark as removed
+            # and move to bottom. Entry shows as "-RMV" and can be restored with 'r'.
+            # This prevents accidental deletion without needing to ESC (losing all changes).
             if boot_entry.removed:
                 # Un-remove: restore entry just before first removed entry (or at end)
                 boot_entry.removed = False
@@ -740,6 +899,30 @@ class EfiBootDude:
                 self.mods.order = True
 
             return None
+
+        copy_entry, self.opts.copy = self.opts.copy, False
+        if copy_entry and boot_entry.is_boot and boot_entry.raw_device:
+            seed = boot_entry.label
+            while True:
+                answer = self.win.answer(prompt='Type new label for copy (must differ from original)',
+                    seed=seed, width=80)
+                answer = answer.strip()
+                if not answer:
+                    # User aborted
+                    break
+                if answer == boot_entry.label:
+                    # Must be different from original
+                    seed = answer
+                    self.win.alert('Label must be different from original')
+                    continue
+                if re.match(r'([\w\s])+$', answer):
+                    # Valid label - add to copies
+                    self.mods.copies.append((answer, boot_entry.raw_device))
+                    break
+        elif copy_entry:
+            # Debug why copy failed
+            msg = f"Copy blocked: is_boot={boot_entry.is_boot}, raw_device={'empty' if not boot_entry.raw_device else 'set'}"
+            self.win.alert(msg)
 
         tag, self.opts.tag = self.opts.tag, False
         if tag and boot_entry.is_boot:
