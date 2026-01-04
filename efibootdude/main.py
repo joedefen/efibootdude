@@ -222,20 +222,20 @@ class EfiBootDude:
         spin = self.spin = OptionSpinner()
         spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
         spin.add_key('verbose', 'v - toggle verbose', vals=[False, True])
-        spin.add_key('up', 'u - move boot entry up', category='action')
-        spin.add_key('down', 'd - move boot entry down', category='action')
-        spin.add_key('remove', 'r - remove boot entry', category='action')
-        spin.add_key('copy', 'c - copy boot entry with new label', category='action')
-        spin.add_key('next', 'n - set next boot to boot entry OR cycle its values', category='action')
-        spin.add_key('star', '* - toggle whether entry is active', category='action')
-        spin.add_key('tag', 't - set a new label for the boot entry', category='action')
-        spin.add_key('modify', 'm - modify the value (on Timeout line)', category='action')
-        spin.add_key('write', 'w - write changes', category='action')
-        spin.add_key('boot', 'b - reboot the machine', category='action')
+        spin.add_key('up', 'u - move boot entry up', genre='action')
+        spin.add_key('down', 'd - move boot entry down', genre='action')
+        spin.add_key('remove', 'r - remove boot entry', genre='action')
+        spin.add_key('copy', 'c - copy boot entry with new label', genre='action')
+        spin.add_key('next', 'n - set next boot to boot entry OR cycle its values', genre='action')
+        spin.add_key('star', '* - toggle whether entry is active', genre='action')
+        spin.add_key('tag', 't - set a new label for the boot entry', genre='action')
+        spin.add_key('modify', 'm - modify the value (on Timeout line)', genre='action')
+        spin.add_key('write', 'w - write changes', genre='action')
+        spin.add_key('boot', 'b - reboot the machine', genre='action')
         spin.add_key('reset', 'ESC - reset edits and refresh',
-                     category='action', keys=[27]) # 27=ESC
+                     genre='action', keys=[27]) # 27=ESC
         spin.add_key('quit', 'q,x - quit program',
-                     category='action', keys=[ord('q'), ord('x')])
+                     genre='action', keys=[ord('q'), ord('x')])
 
         other = ''
         other_keys = set(ord(x) for x in other)
@@ -738,7 +738,7 @@ class EfiBootDude:
         return None
 
     def do_actions(self):
-        """ Handle keys that are category='action' """
+        """ Handle keys that are genre='action' """
 
         quit, self.opts.quit = self.opts.quit, False
         if quit:

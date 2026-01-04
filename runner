@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+# runner.py
+# Located in the top-level APP directory
+# Wrapper to run APP from source for debugging
+
+import runpy
+import sys
+
+# Ensure the package's top directory is on the path so 'APP' can be found.
+# This is usually necessary for debuggers to work correctly.
+# sys.path.insert(0, '.')
+
+# Execute the main module of your package.
+# This mimics the behavior of the 'python -m APP.main' command.
+# This assumes your main execution logic (main() function) is in APP/main.py
+if __name__ == '__main__':
+    # You pass the full module path: 'package_name.module_name'
+    sys.argv[0] = 'efibootdude'  # This makes sys.argv look like the real command execution
+    runpy.run_module('efibootdude.main', run_name='__main__', alter_sys=True)

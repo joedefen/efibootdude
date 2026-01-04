@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "efibootdude"
-version = "1.0.0"
+version = "1.0.1"
 description = "A visual wrapper for efibootmgr"
 authors = [
     { name = "Joe Defen", email = "joedef@duck.com" }
@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
     'importlib-metadata; python_version<"3.8"',
-    'console-window >= 1.0.6',
+    'console-window == 3.1.2',
 ]
 
 [project.urls]
