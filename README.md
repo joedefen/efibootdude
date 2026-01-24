@@ -1,9 +1,11 @@
 # EfiBootDude
 `efibootdude` presents a visual (curses) interface to `efibootmgr` which allows editing the bios boot menu and parameters while running Linux.
 
-* Install `efibootdude` using `pipx install efibootdude`, or however you do so.
-* Prerequisites: install [rhboot/efibootmgr](https://github.com/rhboot/efibootmgr)
+* **Installation**: `pipx install efibootdude`
+* **Prerequisites**: install [rhboot/efibootmgr](https://github.com/rhboot/efibootmgr)
   * For example, on a Debian derived distro, use `sudo apt install efibootmgr`.
+
+![Demo of efibootdude](https://raw.githubusercontent.com/joedefen/efibootdude/main/images/efibootdude-2026-01-24=16-37.gif)
 
 
 `efibootdude` covers the most commonly used capabilities of `efibootmgr`; you can:
@@ -18,7 +20,7 @@ Note: Copying a boot entry effectively adds a new entry with a different label. 
 ## Usage
 After running `efibootdude` and making some changes, you'll see a screen comparable to this:
 ```
- wRITE down next tag *:inact copy rmv v:verbose ?:help quit
+ wRITE down next tag *:inact copy rmv [v]erbose [T]heme ?:help quit
 ──────────────────────────────────────────────────────────────────────────────
    BootNext: ---
    BootCurrent: 0007
@@ -39,12 +41,18 @@ At this point
     it navigation, and/or uncertain of keys not shown on top line.
 * With this current line, we can:
   * Type `u` or `d` to move it up or down in the boot order.
-  * Type `t` to relabel the boot entry.
-  * Type `c` to copy the boot entry with a new label.
+  * Type `t` to relabel the boot entry (prompts for new name).
+  * Type `c` to copy the boot entry with a new label (prompts for new name).
   * Type `r` to remove the boot entry.
+  * Type `m` on the Timeout line to change the boot timeout in seconds.
+  * Type `T` to cycle through available themes.
   * And so forth.
 * The entries with `*` on the left are active boot entries; toggle whether
   active by typing `*` for the corresponding entries.
+* Special status lines at the top:
+  * `BootNext:` shows which entry will boot next (use `n` to set it, or leave as `---`)
+  * `BootCurrent:` shows which entry is currently booted (read-only, set by firmware)
+  * `Timeout:` shows boot timeout in seconds (use `m` to modify)
 * Special indicators:
   * `+ADD` shows pending copy operations (press `r` to cancel before writing)
   * `-RMV` shows entries marked for removal (press `r` to undo before writing)

@@ -32,7 +32,7 @@ Workflow:
 # pylint: disable=too-many-return-statements,too-many-statements
 # pylint: disable=consider-using-in,too-many-nested-blocks
 # pylint: disable=wrong-import-position,disable=wrong-import-order
-# pylint: disable=too-many-locals
+# pylint: disable=too-many-locals,line-too-long
 
 import os
 import sys
@@ -46,7 +46,7 @@ import traceback
 import curses as cs
 import argparse
 # import xml.etree.ElementTree as ET
-from console_window import ConsoleWindow, OptionSpinner
+from console_window import ConsoleWindow, ConsoleWindowOpts, OptionSpinner, Theme, InlineConfirmation
 
 # Use slots for memory efficiency and typo protection on Python 3.10+
 _dataclass_kwargs = {'slots': True} if sys.version_info >= (3, 10) else {}
@@ -232,15 +232,17 @@ class EfiBootDude:
         spin.add_key('modify', 'm - modify the value (on Timeout line)', genre='action')
         spin.add_key('write', 'w - write changes', genre='action')
         spin.add_key('boot', 'b - reboot the machine', genre='action')
+        spin.add_key('theme', 'T - cycle theme', vals=[
+            'default', 'dark-mono', 'light-mono', 'nord'])
         spin.add_key('reset', 'ESC - reset edits and refresh',
                      genre='action', keys=[27]) # 27=ESC
         spin.add_key('quit', 'q,x - quit program',
                      genre='action', keys=[ord('q'), ord('x')])
 
-        other = ''
-        other_keys = set(ord(x) for x in other)
-        other_keys.add(cs.KEY_ENTER)
-        other_keys.add(10) # another form of ENTER
+        # other = ''
+        # other_keys = set(ord(x) for x in other)
+        # other_keys.add(cs.KEY_ENTER)
+        # other_keys.add(10) # another form of ENTER
         self.opts = spin.default_obj
 
         self.actions = {} # currently available actions
@@ -249,12 +251,29 @@ class EfiBootDude:
         self.mods = BootModifications()
         self.boot_entries, self.width1, self.label_wid, self.boot_idx = [], 0, 0, 0
         self.saved_pick_pos = None  # Save cursor position when entering help mode
+
         self.win = None
         self.reinit()
-        self.win = ConsoleWindow(head_line=True, body_rows=len(self.boot_entries)+20, head_rows=10,
-                          keys=spin.keys ^ other_keys, mod_pick=self.mod_pick)
+        win_opts = ConsoleWindowOpts()
+        win_opts.head_line = True
+        win_opts.body_rows = len(self.boot_entries)+20
+        win_opts.head_rows = 10
+        win_opts.min_cols_rows = (70,10)
+        win_opts.mod_pick = self.mod_pick
+        win_opts.ctrl_c_terminates = False
+
+        self.win = ConsoleWindow(win_opts)
         self.win.pick_pos = self.boot_idx  # Start at first boot entry
         self.win.set_pick_mode(True)  # Start in pick mode
+
+        # Initialize theme to first in the list (default)
+        self._current_theme = self.opts.theme
+        Theme.set(self._current_theme)
+
+        # Initialize inline confirmation for text input (Timeout, Tag, Copy)
+        self.inline_confirm = InlineConfirmation()
+        self._inline_action = None  # Track which action is in progress (e.g., 'timeout', 'tag', 'copy')
+        self._inline_context = {}   # Store context data (target entry, etc.)
 
     def reinit(self):
         """ RESET EVERYTHING"""
@@ -343,7 +362,8 @@ class EfiBootDude:
 
             if device:
                 ns.info1 = device
-                ns.info2 = subpath if subpath else other
+                # Only show subpath if present; for USB/network devices without .efi files, leave info2 empty
+                ns.info2 = subpath if subpath else ''
                 width1 = max(width1, len(ns.info1))
             elif subpath:
                 ns.info1 = subpath
@@ -456,6 +476,11 @@ class EfiBootDude:
                 start, _ = mat.span()
                 info1 = info1[:start] + '[Vendor Msg]'
 
+            # Strip PCI device path prefix for USB/network entries
+            # Keep just USB(...) or similar instead of PciRoot(...)/Pci(...)/USB(...)
+            info1 = re.sub(r'PciRoot\([^)]*\)(?:/Pci\([^)]*\))*/', '', info1)
+            info2 = re.sub(r'PciRoot\([^)]*\)(?:/Pci\([^)]*\))*/', '', info2)
+
         # Display removed entries with -RMV instead of ident
         display_ident = '-RMV' if entry.removed else entry.ident
         line = f'{entry.active:>1} {display_ident:>4} {entry.label:<{self.label_wid}}'
@@ -487,7 +512,7 @@ class EfiBootDude:
         # NOTE: probably will not get here...
         os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
         self.reinit()
-        ConsoleWindow._start_curses()
+        ConsoleWindow.start_curses()
         self.win.pick_pos = self.boot_idx
         return None
 
@@ -537,7 +562,10 @@ class EfiBootDude:
             orders = ','.join(orders)
             cmds.append(f'{prefix} --bootorder {orders}')
         if self.mods.next:
-            cmds.append(f'{prefix} --bootnext {self.mods.next}')
+            if self.mods.next == '---':
+                cmds.append(f'{prefix} --delete-bootnext')
+            else:
+                cmds.append(f'{prefix} --bootnext {self.mods.next}')
         if self.mods.timeout:
             cmds.append(f'{prefix} --timeout {self.mods.timeout}')
         ConsoleWindow.stop_curses()
@@ -556,13 +584,12 @@ class EfiBootDude:
             os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
             self.reinit()
 
-        ConsoleWindow._start_curses()
+        ConsoleWindow.start_curses()
         self.win.pick_pos = self.boot_idx
 
     def main_loop(self):
         """ TBD """
 
-        self.opts.name = "[hit 'n' to enter name]"
         while True:
             # Handle transitions into/out of help mode
             if self.opts.help_mode and self.saved_pick_pos is None:
@@ -578,14 +605,6 @@ class EfiBootDude:
             if self.opts.help_mode:
                 self.spin.show_help_nav_keys(self.win)
                 self.spin.show_help_body(self.win)
-                lines = [
-                    '   q or x - quit program (CTL-C disabled)',
-#                   '   c - copy - copy boot entry',
-#                   '   a - add - add boot entry',
-
-                ]
-                for line in lines:
-                    self.win.put_body(line)
             else:
                 # self.win.set_pick_mode(self.opts.pick_mode, self.opts.pick_size)
                 self.win.add_header(self.get_keys_line(), attr=cs.A_BOLD)
@@ -614,10 +633,42 @@ class EfiBootDude:
                 # Render all entries
                 for entry in self.display_entries:
                     line = self.format_boot_entry(entry)
-                    self.win.add_body(line)
+                    attr = None
+                    if '+ADD' in line:
+                        attr=cs.color_pair(Theme.SUCCESS)
+                    elif entry.is_boot and entry.removed:
+                        attr=cs.color_pair(Theme.DANGER)
+                    elif entry.is_boot and not entry.active:
+                        # Dim inactive boot entries
+                        attr=cs.A_DIM
+                    self.win.add_body(line, attr=attr)
+
+                    # Display inline confirmation prompt right after the relevant entry
+                    if self.inline_confirm.active and self._inline_context.get('entry') is entry:
+                        hint = self.inline_confirm.get_hint()
+                        current_value = self.inline_confirm.input_buffer
+
+                        # Create action-specific prompt text
+                        if self._inline_action == 'tag':
+                            action_prompt = 'Enter new label for entry'
+                        elif self._inline_action == 'copy':
+                            action_prompt = 'Enter label for new copy'
+                        elif self._inline_action == 'timeout':
+                            action_prompt = 'Enter timeout (seconds)'
+                        else:
+                            action_prompt = self._inline_action.upper() if self._inline_action else 'INPUT'
+
+                        if not current_value and hint:
+                            prompt_line = f"  → {hint}"
+                            self.win.add_body(prompt_line, attr=cs.color_pair(Theme.WARNING))
+                        else:
+                            cursor = '_'
+                            prompt_line = f"  → {action_prompt}: {current_value}{cursor}"
+                            self.win.add_body(prompt_line, attr=cs.color_pair(Theme.DANGER))
 
             # Update dirty state before rendering to reflect actual changes
             self.update_dirty_state()
+
             self.win.render(redraw=self.redraw)
             self.redraw = False
 
@@ -634,7 +685,8 @@ class EfiBootDude:
             else:
                 line += f' {key}:{verb}'
         # or EXPAND
-        line += ' v:' + ('terse' if self.opts.verbose else 'verbose')
+        line += ' v:terse' if self.opts.verbose else ' [v]erbose'
+        line += f' [T]heme={self.opts.theme}'
         line += ' ?:help quit'
         # for action in self.actions:
             # line += f' {action[0]}:{action}'
@@ -705,6 +757,28 @@ class EfiBootDude:
         if not key:
             return True
         self.redraw = True # any key redraws/fixes screen
+
+        # Check if inline confirmation is active
+        if self.inline_confirm.active:
+            result = self.inline_confirm.handle_key(key)
+            if result == 'confirmed':
+                self._process_inline_confirmation()
+            elif result == 'cancelled':
+                self._inline_action = None
+                self._inline_context = {}
+                self.inline_confirm.cancel()
+
+            # Keep cursor on the entry that was being edited
+            if result in ('confirmed', 'cancelled'):
+                entry_to_stay_on = self._inline_context.get('entry')
+                if entry_to_stay_on and hasattr(self, 'display_entries'):
+                    for i, e in enumerate(self.display_entries):
+                        if e is entry_to_stay_on:
+                            self.win.pick_pos = i
+                            break
+                self.win.set_pick_mode(True)  # Re-enable pick mode
+            return None
+
         if key == cs.KEY_ENTER or key == 10: # Handle ENTER
             if self.opts.help_mode:
                 self.opts.help_mode = False
@@ -716,38 +790,18 @@ class EfiBootDude:
             self.do_actions()
             return value
 
-
-        ns = self.boot_entries[self.win.pick_pos]
-
-        if key == ord('m'):
-            if ns.ident == 'Timeout:':
-                seed = ns.label.split()[0]
-                while True:
-                    answer = self.win.answer(
-                        prompt='Enter timeout seconds or clear to abort',
-                        seed=seed, width=80)
-                    seed = answer = answer.strip()
-                    if not answer:
-                        break
-                    if re.match(r'\d+$', answer):
-                        ns.label = f'{answer} seconds'
-                        self.mods.timeout = answer
-                        break
-            return None
-
-
         return None
 
     def do_actions(self):
         """ Handle keys that are genre='action' """
 
-        quit, self.opts.quit = self.opts.quit, False
-        if quit:
+        do_quit, self.opts.quit = self.opts.quit, False
+        if do_quit:
             answer = 'y'
             if self.mods.dirty:
                 answer = self.win.answer(
                     prompt='Enter "y" to abandon edits and exit')
-            if answer.strip().lower().startswith('y'):
+            if answer and answer.strip().lower().startswith('y'):
                 self.win.stop_curses()
                 os.system('clear; stty sane')
                 sys.exit(0)
@@ -757,7 +811,7 @@ class EfiBootDude:
             if self.mods.dirty:
                 answer = self.win.answer(
                     prompt='Type "y" to clear edits and refresh')
-                if answer.strip().lower().startswith('y'):
+                if answer and answer.strip().lower().startswith('y'):
                     self.reinit()
             else:
                 self.reinit()
@@ -775,8 +829,15 @@ class EfiBootDude:
 
             answer = self.win.answer(prompt='Type "reboot" to reboot',
                     seed='reboot', width=80)
-            if answer.strip().lower().startswith('reboot'):
+            if answer and answer.strip().lower().startswith('reboot'):
                 return self.reboot()
+
+        # Check if theme was changed (cycled) by OptionSpinner
+        new_theme = self.opts.theme if self.opts.theme else 'default'
+        if new_theme != self._current_theme:
+            Theme.set(new_theme)
+            self._current_theme = new_theme
+            self.redraw = True
 
         # Use display_entries if available (includes pending copies)
         digests = getattr(self, 'display_entries', self.boot_entries)
@@ -805,32 +866,27 @@ class EfiBootDude:
         boot_next, self.opts.next = self.opts.next, False
         if boot_next:
             if boot_entry.ident == 'BootNext:':
-                # Get original BootNext value
-                original_next = next((ns.label for ns in self.original_entries if ns.ident == 'BootNext:'), None)
-
-                # Cycle through non-removed boot entries when on BootNext line
+                # Cycle through non-removed boot entries + '---' (default) when on BootNext line
                 boot_entries = [b.ident for b in self.boot_entries if b.is_boot and not b.removed]
                 if not boot_entries:
                     return None
 
+                # Create full cycle: all boot entries + '---' (default)
+                cycle = boot_entries + ['---']
                 current = boot_entry.label
-                # Determine next entry to cycle to
-                if current == original_next or current == '---':
-                    # Start with first boot entry
-                    next_ident = boot_entries[0]
-                elif current in boot_entries:
-                    # Find current in list and move to next (or wrap to original)
-                    idx = boot_entries.index(current)
-                    if idx + 1 < len(boot_entries):
-                        next_ident = boot_entries[idx + 1]
-                    else:
-                        # Wrap back to original
-                        next_ident = original_next
+
+                if current in cycle:
+                    # Find current and move to next (wrapping at end)
+                    idx = cycle.index(current)
+                    next_ident = cycle[(idx + 1) % len(cycle)]
                 else:
-                    # Unknown state, start over
-                    next_ident = boot_entries[0]
+                    # Unknown state, start with first boot entry
+                    next_ident = cycle[0]
 
                 boot_entry.label = next_ident
+                # Get original value to detect if we're cycling back to it
+                original_next = next((ns.label for ns in self.original_entries if ns.ident == 'BootNext:'), None)
+                # Only record change if different from original
                 self.mods.next = next_ident if next_ident != original_next else None
                 return None
 
@@ -867,6 +923,17 @@ class EfiBootDude:
             # Undoable remove feature: Instead of deleting immediately, mark as removed
             # and move to bottom. Entry shows as "-RMV" and can be restored with 'r'.
             # This prevents accidental deletion without needing to ESC (losing all changes).
+
+            # Find the actual position in boot_entries (pick_pos is for display_entries)
+            boot_pos = None
+            for i, entry in enumerate(self.boot_entries):
+                if entry is boot_entry:
+                    boot_pos = i
+                    break
+
+            if boot_pos is None:
+                return None  # Entry not found in boot_entries
+
             if boot_entry.removed:
                 # Un-remove: restore entry just before first removed entry (or at end)
                 boot_entry.removed = False
@@ -875,14 +942,14 @@ class EfiBootDude:
                 # Find insertion point: first removed boot entry, or end of list
                 insert_pos = len(self.boot_entries)
                 for i in range(self.boot_idx, len(self.boot_entries)):
-                    if self.boot_entries[i].is_boot and self.boot_entries[i].removed and i != self.win.pick_pos:
+                    if self.boot_entries[i].is_boot and self.boot_entries[i].removed and i != boot_pos:
                         insert_pos = i
                         break
 
                 # Move entry to insertion point
-                entry = self.boot_entries.pop(self.win.pick_pos)
+                entry = self.boot_entries.pop(boot_pos)
                 # Adjust insert_pos if we removed an item before it
-                if self.win.pick_pos < insert_pos:
+                if boot_pos < insert_pos:
                     insert_pos -= 1
                 self.boot_entries.insert(insert_pos, entry)
                 self.win.pick_pos = insert_pos
@@ -894,8 +961,14 @@ class EfiBootDude:
                 self.mods.actives.discard(boot_entry.ident)
                 self.mods.inactives.discard(boot_entry.ident)
 
+                # Auto-fix BootNext if it points to the removed entry
+                bootnext_entry = self.boot_entries[0]
+                if bootnext_entry.ident == 'BootNext:' and bootnext_entry.label == boot_entry.ident:
+                    bootnext_entry.label = '---'
+                    self.mods.next = None
+
                 # Move to bottom of list
-                self.boot_entries.append(self.boot_entries.pop(self.win.pick_pos))
+                self.boot_entries.append(self.boot_entries.pop(boot_pos))
                 # Keep cursor at same position (next entry moves up)
                 self.mods.order = True
 
@@ -904,22 +977,11 @@ class EfiBootDude:
         copy_entry, self.opts.copy = self.opts.copy, False
         if copy_entry and boot_entry.is_boot and boot_entry.raw_device:
             seed = boot_entry.label
-            while True:
-                answer = self.win.answer(prompt='Type new label for copy (must differ from original)',
-                    seed=seed, width=80)
-                answer = answer.strip()
-                if not answer:
-                    # User aborted
-                    break
-                if answer == boot_entry.label:
-                    # Must be different from original
-                    seed = answer
-                    self.win.alert('Label must be different from original')
-                    continue
-                if re.match(r'([\w\s])+$', answer):
-                    # Valid label - add to copies
-                    self.mods.copies.append((answer, boot_entry.raw_device))
-                    break
+            self.inline_confirm.start(action_type='copy', mode='text')
+            self.inline_confirm.input_buffer = seed
+            self._inline_action = 'copy'
+            self._inline_context = {'entry': boot_entry, 'original_label': boot_entry.label}
+            self.win.set_pick_mode(False)  # Disable pick mode during input
         elif copy_entry:
             # Debug why copy failed
             msg = f"Copy blocked: is_boot={boot_entry.is_boot}, raw_device={'empty' if not boot_entry.raw_device else 'set'}"
@@ -928,17 +990,76 @@ class EfiBootDude:
         tag, self.opts.tag = self.opts.tag, False
         if tag and boot_entry.is_boot:
             seed = boot_entry.label
-            while True:
-                answer = self.win.answer(prompt='Type new label or clear to abort',
-                    seed=seed, width=80)
-                if answer:
-                    seed = answer = answer.strip()
-                if not answer:
-                    break
-                if re.match(r'([\w\s])+$', answer):
-                    boot_entry.label = f'{answer}'
-                    self.mods.tags[boot_entry.ident] = answer
-                    break
+            self.inline_confirm.start(action_type='tag', mode='text')
+            self.inline_confirm.input_buffer = seed
+            self._inline_action = 'tag'
+            self._inline_context = {'entry': boot_entry}
+            self.win.set_pick_mode(False)  # Disable pick mode during input
+
+        modify, self.opts.modify = self.opts.modify, False
+        if modify and boot_entry.ident == 'Timeout:':
+            # Only allow modify on the Timeout line
+            seed = boot_entry.label.split()[0]
+            self.inline_confirm.start(action_type='timeout', mode='text')
+            self.inline_confirm.input_buffer = seed
+            self._inline_action = 'timeout'
+            self._inline_context = {'entry': boot_entry}
+            self.win.set_pick_mode(False)  # Disable pick mode during input
+
+    def _process_inline_confirmation(self):
+        """Process inline confirmation result based on action type."""
+        action = self._inline_action
+        value = self.inline_confirm.input_buffer.strip()
+
+        if action == 'timeout':
+            if not value:
+                self.inline_confirm.cancel()
+                self._inline_action = None
+                return
+            if re.match(r'\d+$', value):
+                entry = self._inline_context['entry']
+                entry.label = f'{value} seconds'
+                self.mods.timeout = value
+                self.inline_confirm.cancel()
+                self._inline_action = None
+            else:
+                self.win.alert('Timeout must be digits only')
+                self.inline_confirm.input_buffer = ''
+
+        elif action == 'tag':
+            if not value:
+                self.inline_confirm.cancel()
+                self._inline_action = None
+                return
+            if re.match(r'([\w\s])+$', value):
+                entry = self._inline_context['entry']
+                entry.label = value
+                self.mods.tags[entry.ident] = value
+                self.inline_confirm.cancel()
+                self._inline_action = None
+            else:
+                self.win.alert('Label must contain only letters, numbers, or spaces')
+                self.inline_confirm.input_buffer = ''
+
+        elif action == 'copy':
+            if not value:
+                self.inline_confirm.cancel()
+                self._inline_action = None
+                return
+            entry = self._inline_context['entry']
+            original_label = self._inline_context['original_label']
+            if value == original_label:
+                # Must be different from original - alert user and stay in input mode
+                self.win.alert('Label must be different from original')
+                self.inline_confirm.input_buffer = ''
+                return
+            if re.match(r'([\w\s])+$', value):
+                self.mods.copies.append((value, entry.raw_device))
+                self.inline_confirm.cancel()
+                self._inline_action = None
+            else:
+                self.win.alert('Label must contain only letters, numbers, or spaces')
+                self.inline_confirm.input_buffer = ''
 
 
 def main():
