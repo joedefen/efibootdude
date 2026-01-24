@@ -495,6 +495,7 @@ class EfiBootDude:
         """ Commit the changes. """
         if not self.mods.dirty:
             return
+
         cmds = []
         prefix = 'sudo efibootmgr --quiet'
         for ident in self.mods.removes:
@@ -807,8 +808,8 @@ class EfiBootDude:
                 # Get original BootNext value
                 original_next = next((ns.label for ns in self.original_entries if ns.ident == 'BootNext:'), None)
 
-                # Cycle through boot entries when on BootNext line
-                boot_entries = [b.ident for b in self.boot_entries if b.is_boot]
+                # Cycle through non-removed boot entries when on BootNext line
+                boot_entries = [b.ident for b in self.boot_entries if b.is_boot and not b.removed]
                 if not boot_entries:
                     return None
 
@@ -930,7 +931,8 @@ class EfiBootDude:
             while True:
                 answer = self.win.answer(prompt='Type new label or clear to abort',
                     seed=seed, width=80)
-                seed = answer = answer.strip()
+                if answer:
+                    seed = answer = answer.strip()
                 if not answer:
                     break
                 if re.match(r'([\w\s])+$', answer):
