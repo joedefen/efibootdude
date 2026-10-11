@@ -11,15 +11,21 @@ authors = [
 ]
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.8"
-keywords = ["app", "installer", "manager", "appimages"]
+requires-python = ">=3.11"
+keywords = ["efi", "uefi", "efibootmgr", "boot", "bootloader", "tui", "curses"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: POSIX :: Linux"
+    "Operating System :: POSIX :: Linux",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: System Administrators",
+    "Topic :: System :: Boot",
+    "Topic :: System :: Systems Administration"
 ]
 dependencies = [
-    'importlib-metadata; python_version<"3.8"',
     'console-window == 1.4.3',
 ]
 

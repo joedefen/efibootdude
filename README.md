@@ -2,11 +2,58 @@
 `efibootdude` presents a visual (curses) interface to `efibootmgr` which allows editing the bios boot menu and parameters while running Linux.
 
 * **Installation**: `pipx install efibootdude`
-* **Prerequisites**: install [rhboot/efibootmgr](https://github.com/rhboot/efibootmgr)
-  * For example, on a Debian derived distro, use `sudo apt install efibootmgr`.
+* **Prerequisites**:
+  * Python **3.11 or newer**.
+  * Install [rhboot/efibootmgr](https://github.com/rhboot/efibootmgr)
+    * For example, on a Debian derived distro, use `sudo apt install efibootmgr`.
 
 ![Demo of efibootdude](https://raw.githubusercontent.com/joedefen/efibootdude/main/images/efibootdude-2026-01-24=16-37.gif)
 
+## Privileges: `efibootdude` elevates to root automatically
+
+`efibootdude` is **designed to be launched as your normal, unprivileged user**.
+Reading and writing the UEFI boot variables, however, requires root. Rather than
+making you launch the whole application with `sudo`, `efibootdude` **elevates
+automatically**: each privileged action it performs — writing changes with
+`efibootmgr` and rebooting — is run through `sudo` on your behalf. In practice,
+when you press `w` (write) or `b` (reboot), `efibootdude` **becomes root for you**
+without you typing `sudo` yourself. Only the individual `efibootmgr`/`reboot`
+commands are elevated; the TUI itself keeps running as your normal user.
+
+* The first time a privileged command runs you may be prompted for your password
+  (unless your `sudo` credentials are already cached). Because `efibootdude`
+  briefly leaves curses mode before running the commands, the `sudo` prompt and
+  the resulting command output and exit codes are shown plainly on the terminal.
+* Tip: run `sudo -v` in another terminal first if you want to pre-authorize
+  before starting `efibootdude` and avoid an in-app prompt.
+* **Do not** launch the whole program as root (`sudo efibootdude`). It works, but
+  it is unnecessary and needlessly widens the blast radius — let `efibootdude`
+  elevate only what it needs.
+
+### Doing it safely
+
+Elevating only the individual commands (rather than the whole TUI) is the safer
+design, but you should still understand what you are handing over:
+
+* **Root is blanket authority.** Every generated command runs as root. Before
+  anything is executed, `efibootdude` prints the exact command list and asks
+  `Run the above commands? (yes/No)`. **Read that list before answering `yes`** —
+  it is your last chance to catch a mistyped label or the wrong partition.
+* **Prefer scoping `sudo` to the two binaries.** If you want to skip password
+  prompts, grant passwordless `sudo` for just `efibootmgr` and `reboot` instead
+  of for `efibootdude` as a whole. With `sudo visudo`, add a line such as:
+  ```
+  youruser ALL=(root) NOPASSWD: /usr/sbin/efibootmgr, /sbin/reboot
+  ```
+  (Paths vary by distro; confirm them with `command -v efibootmgr` and
+  `command -v reboot`.) This is safer than `NOPASSWD: ALL` and safer than
+  whitelisting the TUI wrapper.
+* **Boot-menu changes are firmware-level and persistent.** A bad write can leave
+  a machine unbootable. Keep a recovery USB and know how to reach your firmware
+  setup screen. The undoable-remove (`-RMV`) feature and the confirmation prompt
+  reduce mistakes but are not a substitute for a recovery plan.
+* **Reboot is immediate.** The `b` key ultimately runs `sudo reboot now` after a
+  typed confirmation.
 
 `efibootdude` covers the most commonly used capabilities of `efibootmgr`; you can:
 
@@ -38,7 +85,7 @@ At this point
 * The top line shows actions for the current line; type the underscored letter to effect its action.
 * Type `?` for a more complete explanation of the keys, navigation keys, etc.
   * **ALWAYS** view the help at least once if unfamiliar with this tool,
-    it navigation, and/or uncertain of keys not shown on top line.
+    its navigation, and/or uncertain of keys not shown on top line.
 * With this current line, we can:
   * Type `u` or `d` to move it up or down in the boot order.
   * Type `t` to relabel the boot entry (prompts for new name).

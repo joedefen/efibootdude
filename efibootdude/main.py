@@ -31,7 +31,7 @@ Workflow:
 # pylint: disable=too-many-instance-attributes,too-many-branches
 # pylint: disable=too-many-return-statements,too-many-statements
 # pylint: disable=consider-using-in,too-many-nested-blocks
-# pylint: disable=wrong-import-position,disable=wrong-import-order
+# pylint: disable=wrong-import-position,wrong-import-order
 # pylint: disable=too-many-locals,line-too-long
 
 import os
@@ -48,8 +48,9 @@ import argparse
 # import xml.etree.ElementTree as ET
 from console_window import ConsoleWindow, ConsoleWindowOpts, OptionSpinner, Theme, InlineConfirmation
 
-# Use slots for memory efficiency and typo protection on Python 3.10+
-_dataclass_kwargs = {'slots': True} if sys.version_info >= (3, 10) else {}
+# Use slots for memory efficiency and typo protection.
+# (``slots=True`` requires Python 3.10+; the project floor is now 3.11.)
+_dataclass_kwargs = {'slots': True}
 
 @dataclass(**_dataclass_kwargs)
 class BootEntry:
