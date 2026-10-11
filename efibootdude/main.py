@@ -42,6 +42,7 @@ import copy
 from dataclasses import dataclass, field
 from typing import Optional
 import subprocess
+import shlex
 import traceback
 import curses as cs
 import argparse
@@ -139,14 +140,25 @@ class SystemInfo:
         self.uuids = self.get_part_uuids()
 
     @staticmethod
+    def _unescape_mount(text):
+        """Decode the octal escapes used by /proc/mounts.
+
+        The kernel escapes space (\\040), tab (\\011), newline (\\012) and
+        backslash (\\134) inside ``/proc/mounts`` fields, so a mount point such
+        as ``/mnt/my dir`` appears as ``/mnt/my\\040dir``.  Decoding those
+        escapes makes the strings match real filesystem paths.
+        """
+        return re.sub(r'\\([0-7]{3})', lambda m: chr(int(m.group(1), 8)), text)
+
+    @staticmethod
     def get_mounts():
         """Get a dictionary of device-to-mount-point"""
         mounts = {}
         with open('/proc/mounts', 'r', encoding='utf-8') as mounts_file:
             for line in mounts_file:
                 parts = line.split()
-                dev = parts[0]
-                mount_point = parts[1]
+                dev = SystemInfo._unescape_mount(parts[0])
+                mount_point = SystemInfo._unescape_mount(parts[1])
                 mounts[dev] = mount_point
         return mounts
 
@@ -247,7 +259,7 @@ class EfiBootDude:
         self.opts = spin.default_obj
 
         self.actions = {} # currently available actions
-        self.check_preqreqs()
+        self.check_prereqs()
         self.sysinfo = SystemInfo()
         self.mods = BootModifications()
         self.boot_entries, self.width1, self.label_wid, self.boot_idx = [], 0, 0, 0
@@ -297,7 +309,11 @@ class EfiBootDude:
             # if given a "testfile" (which should be just the
             # raw output of 'efibootmgr'), then parse it
             with open(self.testfile, 'r', encoding='utf-8') as fh:
-                lines = fh.readlines()
+                # splitlines() (not readlines()) keeps this parse path identical
+                # to the live efibootmgr path below, which also has no line
+                # terminators.  Otherwise the trailing newline leaks into the
+                # BootOrder parsing and into the system-info labels.
+                lines = fh.read().splitlines()
         else: # run efibootmgr
             command = 'efibootmgr'.split()
             result = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=True)
@@ -306,6 +322,7 @@ class EfiBootDude:
         width1 = 0  # width of info1
         label_wid = 0
         boots = {}
+        boot_order = ''  # default in case the efibootmgr output lacks BootOrder:
         for line in ['BootNext: ---'] + lines:
             parts = line.split(maxsplit=1)
             if len(parts) < 2:
@@ -489,7 +506,7 @@ class EfiBootDude:
         return line
 
     @staticmethod
-    def check_preqreqs():
+    def check_prereqs():
         """ Check that needed programs are installed. """
         ok = True
         for prog in 'efibootmgr'.split():
@@ -508,7 +525,15 @@ class EfiBootDude:
     def reboot(self):
         """ Reboot the machine """
         ConsoleWindow.stop_curses()
-        os.system('clear; stty sane; (set -x; sudo reboot now)')
+        os.system('clear; stty sane')
+        # Elevated via sudo, but run as an argument list (no shell) so nothing
+        # can be re-interpreted by a shell.
+        cmd = ['sudo', 'reboot', 'now']
+        print(f' + {shlex.join(cmd)}')
+        try:
+            subprocess.run(cmd, check=False)
+        except OSError as exce:
+            print(f'    !!! {exce}')
 
         # NOTE: probably will not get here...
         os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
@@ -517,70 +542,97 @@ class EfiBootDude:
         self.win.pick_pos = self.boot_idx
         return None
 
+    def build_commands(self):
+        """ Build the privileged efibootmgr commands to run.
+
+        Each command is returned as an argument list (argv), not a shell
+        string.  Running these via ``subprocess`` without a shell means no
+        value (labels, device paths, ...) is ever re-parsed by ``/bin/sh``, so
+        a crafted label cannot inject extra commands — which matters because
+        these commands run as root.
+
+        Returns:
+            list[list[str]]: argv lists, each beginning with ``'sudo'``.
+        """
+        cmds = []
+        prefix = ['sudo', 'efibootmgr', '--quiet']
+        for ident in self.mods.removes:
+            cmds.append(prefix + ['--delete-bootnum', '--bootnum', ident])
+        for ident in self.mods.actives:
+            cmds.append(prefix + ['--active', '--bootnum', ident])
+        for ident in self.mods.inactives:
+            cmds.append(prefix + ['--inactive', '--bootnum', ident])
+        for ident, tag in self.mods.tags.items():
+            cmds.append(prefix + ['--bootnum', ident, '--label', tag])
+        for label, raw_device in self.mods.copies:
+            # raw_device: "device|efi_path" e.g., "/boot/efi|\EFI\ubuntu\shimx64.efi"
+            if '|' not in raw_device:
+                continue
+            device_path, efi_path = raw_device.split('|', 1)
+            # Extract disk and partition from device path
+            # e.g., /dev/nvme0n1p1 -> disk=/dev/nvme0n1, part=1
+            # or /boot/efi -> need to find actual device from mounts
+            disk, part = None, None
+            if device_path.startswith('/dev/'):
+                # Direct device path
+                # Handle both NVMe (/dev/nvme0n1p3) and SATA/SCSI (/dev/sda3)
+                mat = re.match(r'(/dev/(?:nvme\d+n\d+|[a-z]+))p?(\d+)$', device_path)
+                if mat:
+                    disk, part = mat.group(1), mat.group(2)
+            else:
+                # Mount point - reverse lookup to device
+                for dev, mnt in self.sysinfo.mounts.items():
+                    if mnt == device_path:
+                        # Handle both NVMe (/dev/nvme0n1p3) and SATA/SCSI (/dev/sda3)
+                        mat = re.match(r'(/dev/(?:nvme\d+n\d+|[a-z]+))p?(\d+)$', dev)
+                        if mat:
+                            disk, part = mat.group(1), mat.group(2)
+                        break
+
+            if disk and part:
+                cmds.append(prefix + ['--create', '--disk', disk, '--part', part,
+                                      '--label', label, '--loader', efi_path])
+        if self.mods.order:
+            orders = ','.join(ns.ident for ns in self.boot_entries
+                              if ns.is_boot and not ns.removed)
+            cmds.append(prefix + ['--bootorder', orders])
+        if self.mods.next:
+            if self.mods.next == '---':
+                cmds.append(prefix + ['--delete-bootnext'])
+            else:
+                cmds.append(prefix + ['--bootnext', self.mods.next])
+        if self.mods.timeout:
+            cmds.append(prefix + ['--timeout', self.mods.timeout])
+        return cmds
+
     def write(self):
         """ Commit the changes. """
         if not self.mods.dirty:
             return
 
-        cmds = []
-        prefix = 'sudo efibootmgr --quiet'
-        for ident in self.mods.removes:
-            cmds.append(f'{prefix} --delete-bootnum --bootnum {ident}')
-        for ident in self.mods.actives:
-            cmds.append(f'{prefix} --active --bootnum {ident}')
-        for ident in self.mods.inactives:
-            cmds.append(f'{prefix} --inactive --bootnum {ident}')
-        for ident, tag in self.mods.tags.items():
-            cmds.append(f'{prefix} --bootnum {ident} --label "{tag}"')
-        for label, raw_device in self.mods.copies:
-            # Parse raw_device: "device|efi_path" e.g., "/boot/efi|\EFI\ubuntu\shimx64.efi"
-            if '|' in raw_device:
-                device_path, efi_path = raw_device.split('|', 1)
-                # Extract disk and partition from device path
-                # e.g., /dev/nvme0n1p1 -> disk=/dev/nvme0n1, part=1
-                # or /boot/efi -> need to find actual device from mounts
-                disk, part = None, None
-                if device_path.startswith('/dev/'):
-                    # Direct device path
-                    # Handle both NVMe (/dev/nvme0n1p3) and SATA/SCSI (/dev/sda3)
-                    mat = re.match(r'(/dev/(?:nvme\d+n\d+|[a-z]+))p?(\d+)$', device_path)
-                    if mat:
-                        disk, part = mat.group(1), mat.group(2)
-                else:
-                    # Mount point - reverse lookup to device
-                    for dev, mnt in self.sysinfo.mounts.items():
-                        if mnt == device_path:
-                            # Handle both NVMe (/dev/nvme0n1p3) and SATA/SCSI (/dev/sda3)
-                            mat = re.match(r'(/dev/(?:nvme\d+n\d+|[a-z]+))p?(\d+)$', dev)
-                            if mat:
-                                disk, part = mat.group(1), mat.group(2)
-                            break
+        cmds = self.build_commands()
 
-                if disk and part:
-                    cmds.append(f'{prefix} --create --disk {disk} --part {part} --label "{label}" --loader "{efi_path}"')
-        if self.mods.order:
-            orders = [ns.ident for ns in self.boot_entries if ns.is_boot and not ns.removed]
-            orders = ','.join(orders)
-            cmds.append(f'{prefix} --bootorder {orders}')
-        if self.mods.next:
-            if self.mods.next == '---':
-                cmds.append(f'{prefix} --delete-bootnext')
-            else:
-                cmds.append(f'{prefix} --bootnext {self.mods.next}')
-        if self.mods.timeout:
-            cmds.append(f'{prefix} --timeout {self.mods.timeout}')
         ConsoleWindow.stop_curses()
         os.system('clear; stty sane')
         print('Commands:')
         for cmd in cmds:
-            print(f' + {cmd}')
+            print(f' + {shlex.join(cmd)}')
         yes = input("Run the above commands? (yes/No) ")
 
         if yes.lower().startswith('y'):
-            os.system('/bin/echo; /bin/echo')
+            print()
+            print()
 
             for cmd in cmds:
-                os.system(f'(set -x; {cmd}); /bin/echo "    <<<ExitCode=$?>>>"')
+                # Show the command (shell-quoted for readability) then run it as
+                # an argument list so no shell interprets the arguments.
+                print(f' + {shlex.join(cmd)}')
+                try:
+                    ret = subprocess.run(cmd, check=False).returncode
+                except OSError as exce:
+                    print(f'    !!! {exce}')
+                    ret = 127  # shell convention for "command not found"
+                print(f'    <<<ExitCode={ret}>>>')
 
             os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
             self.reinit()

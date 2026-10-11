@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "efibootdude"
-version = "1.0.3"
+version = "1.1.0"
 description = "A visual wrapper for efibootmgr"
 authors = [
     { name = "Joe Defen", email = "joedef@duck.com" }
@@ -29,9 +29,17 @@ dependencies = [
     'console-window == 1.4.3',
 ]
 
+[project.optional-dependencies]
+dev = [
+    'pytest>=7',
+]
+
 [project.urls]
 "Homepage" = "https://github.com/joedefen/efibootdude"
 "Bug Tracker" = "https://github.com/joedefen/efibootdude/issues"
 
 [project.scripts]
 efibootdude = "efibootdude.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
