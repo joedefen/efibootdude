@@ -228,5 +228,67 @@ def test_build_commands_delete_bootnext():
     assert ['sudo', 'efibootmgr', '--quiet', '--delete-bootnext'] in dude.build_commands()
 
 
+# --------------------------------------------------------------------------- #
+# Header line (console-window fancy-header markup)
+# --------------------------------------------------------------------------- #
+def test_get_keys_line_uses_fancy_header_markup():
+    from console_window.header import KEY, parse_fancy_header
+
+    dude = make_dude()
+    dude.opts.theme = 'default'
+    dude.actions = {'u': 'up', 'w': 'wRITE', '*': 'inact'}
+
+    line = dude.get_keys_line()
+
+    assert line == ('[u]p [w]RITE [*]:inact [v]erbose '
+                    '[T]heme=default [?]:help [q]uit')
+    # The brackets are markup: the rendered text drops them, and every hot key
+    # is a KEY span, so add_fancy_header(mode='Underline') styles them alike.
+    spans = parse_fancy_header(line)
+    assert ''.join(span.text for span in spans) == (
+        'up wRITE *:inact verbose Theme=default ?:help quit')
+    key_chars = {'u', 'w', '*', 'v', 'T', '?', 'q'}
+    assert {span.text for span in spans if span.role == KEY} == key_chars
+
+
+# --------------------------------------------------------------------------- #
+# write(): curses suspend/resume around the privileged commands
+# --------------------------------------------------------------------------- #
+def test_write_suspends_and_resumes_curses(monkeypatch):
+    dude = make_dude()
+    dude.mods = BootModifications()
+    dude.mods.removes.add('0002')
+    dude.mods.dirty = True
+    calls = []
+
+    class FakeWin:
+        """Stands in for ConsoleWindow: tracks the suspend/resume pair."""
+
+        def __init__(self):
+            self.scr = object()
+
+        def suspend_curses(self):
+            calls.append('suspend')
+            self.scr = None
+
+        def resume_curses(self):
+            calls.append('resume')
+            self.scr = object()
+
+        def clear(self):
+            # main_loop() calls this right after do_key(); it must not see a
+            # detached window (the old crash was scr=None after start_curses()).
+            assert self.scr is not None, 'clear() ran with scr=None'
+
+    dude.win = FakeWin()
+    monkeypatch.setattr('builtins.input', lambda *args, **kwargs: 'n')
+    monkeypatch.setattr('os.system', lambda *args, **kwargs: 0)
+
+    dude.write()
+
+    assert calls == ['suspend', 'resume']
+    dude.win.clear()
+
+
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__]))

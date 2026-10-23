@@ -233,7 +233,7 @@ class EfiBootDude:
         self.redraw = False # force redraw
 
         spin = self.spin = OptionSpinner()
-        spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
+        spin.add_key('help', '? - toggle help screen', genre='action')
         spin.add_key('verbose', 'v - toggle verbose', vals=[False, True])
         spin.add_key('up', 'u - move boot entry up', genre='action')
         spin.add_key('down', 'd - move boot entry down', genre='action')
@@ -263,6 +263,7 @@ class EfiBootDude:
         self.sysinfo = SystemInfo()
         self.mods = BootModifications()
         self.boot_entries, self.width1, self.label_wid, self.boot_idx = [], 0, 0, 0
+        self.help_mode = False  # help screen visibility (not a spin option)
         self.saved_pick_pos = None  # Save cursor position when entering help mode
 
         self.win = None
@@ -272,7 +273,6 @@ class EfiBootDude:
         win_opts.body_rows = len(self.boot_entries)+20
         win_opts.head_rows = 10
         win_opts.min_cols_rows = (70,10)
-        win_opts.mod_pick = self.mod_pick
         win_opts.ctrl_c_terminates = False
 
         self.win = ConsoleWindow(win_opts)
@@ -524,22 +524,27 @@ class EfiBootDude:
 
     def reboot(self):
         """ Reboot the machine """
-        ConsoleWindow.stop_curses()
-        os.system('clear; stty sane')
-        # Elevated via sudo, but run as an argument list (no shell) so nothing
-        # can be re-interpreted by a shell.
-        cmd = ['sudo', 'reboot', 'now']
-        print(f' + {shlex.join(cmd)}')
+        # Hand the terminal back without destroying the window; resume_curses()
+        # reattaches the screen afterwards (stop_curses() can tear the window
+        # down for good, which used to leave win.scr as None here).
+        self.win.suspend_curses()
         try:
-            subprocess.run(cmd, check=False)
-        except OSError as exce:
-            print(f'    !!! {exce}')
+            os.system('clear; stty sane')
+            # Elevated via sudo, but run as an argument list (no shell) so
+            # nothing can be re-interpreted by a shell.
+            cmd = ['sudo', 'reboot', 'now']
+            print(f' + {shlex.join(cmd)}')
+            try:
+                subprocess.run(cmd, check=False)
+            except OSError as exce:
+                print(f'    !!! {exce}')
 
-        # NOTE: probably will not get here...
-        os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
-        self.reinit()
-        ConsoleWindow.start_curses()
-        self.win.pick_pos = self.boot_idx
+            # NOTE: probably will not get here...
+            os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
+            self.reinit()
+        finally:
+            self.win.resume_curses()
+            self.redraw = True
         return None
 
     def build_commands(self):
@@ -612,56 +617,63 @@ class EfiBootDude:
 
         cmds = self.build_commands()
 
-        ConsoleWindow.stop_curses()
-        os.system('clear; stty sane')
-        print('Commands:')
-        for cmd in cmds:
-            print(f' + {shlex.join(cmd)}')
-        yes = input("Run the above commands? (yes/No) ")
-
-        if yes.lower().startswith('y'):
-            print()
-            print()
-
+        # Hand the terminal back without destroying the window; endwin()
+        # keeps the pads and content model, and resume_curses() reattaches
+        # them so the next render() repaints.
+        self.win.suspend_curses()
+        try:
+            os.system('clear; stty sane')
+            print('Commands:')
             for cmd in cmds:
-                # Show the command (shell-quoted for readability) then run it as
-                # an argument list so no shell interprets the arguments.
                 print(f' + {shlex.join(cmd)}')
-                try:
-                    ret = subprocess.run(cmd, check=False).returncode
-                except OSError as exce:
-                    print(f'    !!! {exce}')
-                    ret = 127  # shell convention for "command not found"
-                print(f'    <<<ExitCode={ret}>>>')
+            yes = input("Run the above commands? (yes/No) ")
 
-            os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
-            self.reinit()
+            if yes.lower().startswith('y'):
+                print()
+                print()
 
-        ConsoleWindow.start_curses()
-        self.win.pick_pos = self.boot_idx
+                for cmd in cmds:
+                    # Show the command (shell-quoted for readability) then run it
+                    # as an argument list so no shell interprets the arguments.
+                    print(f' + {shlex.join(cmd)}')
+                    try:
+                        ret = subprocess.run(cmd, check=False).returncode
+                    except OSError as exce:
+                        print(f'    !!! {exce}')
+                        ret = 127  # shell convention for "command not found"
+                    print(f'    <<<ExitCode={ret}>>>')
+
+                os.system(r'/bin/echo -e "\n\n===== Press ENTER for menu ====> \c"; read FOO')
+                self.reinit()
+        finally:
+            self.win.resume_curses()
+            self.redraw = True
 
     def main_loop(self):
         """ TBD """
 
         while True:
             # Handle transitions into/out of help mode
-            if self.opts.help_mode and self.saved_pick_pos is None:
+            if self.help_mode and self.saved_pick_pos is None:
                 # Entering help mode - save cursor position and disable pick mode
                 self.saved_pick_pos = self.win.pick_pos
                 self.win.set_pick_mode(False)
-            elif not self.opts.help_mode and self.saved_pick_pos is not None:
+            elif not self.help_mode and self.saved_pick_pos is not None:
                 # Exiting help mode - restore cursor position and enable pick mode
                 self.win.pick_pos = self.saved_pick_pos
                 self.saved_pick_pos = None
                 self.win.set_pick_mode(True)
 
-            if self.opts.help_mode:
+            # Recompute the dirty flag before anything is built for this
+            # frame: the header's action hints (e.g. 'w' only when dirty)
+            # must reflect the key that was just handled, not the state
+            # from the previous frame.
+            self.update_dirty_state()
+
+            if self.help_mode:
                 self.spin.show_help_nav_keys(self.win)
                 self.spin.show_help_body(self.win)
             else:
-                # self.win.set_pick_mode(self.opts.pick_mode, self.opts.pick_size)
-                self.win.add_header(self.get_keys_line(), attr=cs.A_BOLD)
-
                 # Build display list with pending copies injected before removed entries
                 self.display_entries = []
                 pending_copies_added = False
@@ -682,6 +694,16 @@ class EfiBootDude:
                             pending_copies_added = True
 
                     self.display_entries.append(entry)
+
+                # Action hints depend on the highlighted row, so recompute
+                # them once per frame, after display_entries is current and
+                # before the header is built.  (This used to happen inside
+                # the mod_pick callback, which runs while the picked row is
+                # being painted.)
+                self.actions = self.get_actions()
+                # add_fancy_header turns the '[k]' markup into one consistent
+                # key style (underlined+bold) instead of hand-picked attrs.
+                self.win.add_fancy_header(self.get_keys_line(), mode='Underline')
 
                 # Render all entries
                 for entry in self.display_entries:
@@ -719,9 +741,6 @@ class EfiBootDude:
                             prompt_line = f"  → {action_prompt}: {current_value}{cursor}"
                             self.win.add_body(prompt_line, attr=cs.color_pair(Theme.DANGER))
 
-            # Update dirty state before rendering to reflect actual changes
-            self.update_dirty_state()
-
             self.win.render(redraw=self.redraw)
             self.redraw = False
 
@@ -729,20 +748,25 @@ class EfiBootDude:
             self.win.clear()
 
     def get_keys_line(self):
-        """ TBD """
-        # EXPAND
+        """ Build the context-sensitive key hints for the header.
+
+            Every hot key is written as the fancy-header markup ``[k]``, which
+            add_fancy_header(mode='Underline') renders uniformly: the key
+            (only) is underlined+bold and the brackets are markup, not text.
+            Building the line is side-effect free; it is added to the header
+            exactly once per frame by main_loop().
+        """
         line = ''
         for key, verb in self.actions.items():
+            # Drop the redundant key prefix when the verb already starts
+            # with it (e.g. '[u]p' rather than '[u]:up').
             if key[0] == verb[0]:
-                line += f' {verb}'
+                line += f' [{key[0]}]{verb[1:]}'
             else:
-                line += f' {key}:{verb}'
-        # or EXPAND
-        line += ' v:terse' if self.opts.verbose else ' [v]erbose'
-        line += f' [T]heme={self.opts.theme}'
-        line += ' ?:help quit'
-        # for action in self.actions:
-            # line += f' {action[0]}:{action}'
+                line += f' [{key[0]}]{key[1:]}:{verb}'
+        line += ' [v]:terse' if self.opts.verbose else ' [v]erbose'
+        # line += f' [T]heme={self.opts.theme}'
+        line += ' [?]:help [q]uit'
         return line[1:]
 
     def get_actions(self):
@@ -784,27 +808,6 @@ class EfiBootDude:
 
         return actions
 
-    @staticmethod
-    def mod_pick(line):
-        """ Callback to modify the "pick line" being highlighted;
-            We use it to alter the state
-        """
-        this = EfiBootDude.singleton
-        this.actions = this.get_actions()
-        header = this.get_keys_line()
-        wds = header.split()
-        this.win.head.pad.move(0, 0)
-        for wd in wds:
-            if wd:
-                this.win.add_header(wd[0], attr=cs.A_BOLD|cs.A_UNDERLINE, resume=True)
-            if wd[1:]:
-                this.win.add_header(wd[1:] + ' ', resume=True)
-
-        _, col = this.win.head.pad.getyx()
-        pad = ' ' * (this.win.get_pad_width()-col)
-        this.win.add_header(pad, resume=True)
-        return line
-
     def do_key(self, key):
         """ TBD """
         if not key:
@@ -832,10 +835,14 @@ class EfiBootDude:
                 self.win.set_pick_mode(True)  # Re-enable pick mode
             return None
 
+        # ENTER or ESC leaves the help screen.  This must happen before the
+        # spinner dispatch so ESC does not fall through to the 'reset' action
+        # (which would discard pending edits) while help is showing.
+        if self.help_mode and key in (cs.KEY_ENTER, 10, 27):  # 27=ESC
+            self.help_mode = False
+            return True
+
         if key == cs.KEY_ENTER or key == 10: # Handle ENTER
-            if self.opts.help_mode:
-                self.opts.help_mode = False
-                return True
             return None
 
         if key in self.spin.keys:
@@ -848,6 +855,11 @@ class EfiBootDude:
     def do_actions(self):
         """ Handle keys that are genre='action' """
 
+        toggle_help, self.opts.help = self.opts.help, False
+        if toggle_help:
+            self.help_mode = not self.help_mode
+            return None
+
         do_quit, self.opts.quit = self.opts.quit, False
         if do_quit:
             answer = 'y'
@@ -855,7 +867,9 @@ class EfiBootDude:
                 answer = self.win.answer(
                     prompt='Enter "y" to abandon edits and exit')
             if answer and answer.strip().lower().startswith('y'):
-                self.win.stop_curses()
+                # Real teardown, not a suspend: stop_curses() is resumable in
+                # singleton mode, and we are leaving for good.
+                ConsoleWindow.stop_all()
                 os.system('clear; stty sane')
                 sys.exit(0)
 
@@ -1131,7 +1145,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         pass
     except Exception as exce:
-        ConsoleWindow.stop_curses()
+        ConsoleWindow.stop_all()
         print("exception:", str(exce))
         print(traceback.format_exc())
 #       if dump_str:
