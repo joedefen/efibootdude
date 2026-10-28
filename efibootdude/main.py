@@ -703,7 +703,7 @@ class EfiBootDude:
                 self.actions = self.get_actions()
                 # add_fancy_header turns the '[k]' markup into one consistent
                 # key style (underlined+bold) instead of hand-picked attrs.
-                self.win.add_fancy_header(self.get_keys_line(), mode='Underline')
+                self.win.add_fancy_header(self.get_keys_line(), mode='Underline', line_attr=cs.A_DIM)
 
                 # Render all entries
                 for entry in self.display_entries:

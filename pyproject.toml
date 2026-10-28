@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "efibootdude"
-version = "1.1.0"
+version = "2.1.0"
 description = "A visual wrapper for efibootmgr"
 authors = [
     { name = "Joe Defen", email = "joedef@duck.com" }
@@ -26,8 +26,7 @@ classifiers = [
     "Topic :: System :: Systems Administration"
 ]
 dependencies = [
-    # 'console-window == 1.4.3',
-    'console-window == 2.0.0.7',
+    'console-window == 2.1.3',
 ]
 
 [project.optional-dependencies]
