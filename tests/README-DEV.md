@@ -125,16 +125,18 @@ it was told about. Which ones those are is `[tool.bless] branches` in
 * `branches = ["main"]` -- one release branch. Nothing is aligned, and `publish`
   pushes `main` and the tag. This is what this project uses, so a small change
   can be published straight from the trunk.
-* `branches = ["main", "dev"]` -- the default when the setting is absent. Both
-  must exist locally and as `origin/main` and `origin/dev`, and whichever of the
-  two lags is fast-forwarded onto the other before the tag, so a release always
-  leaves them at one commit.
+* `branches = ["main", "dev"]` -- the default when the setting is absent. While
+  you are on `main`, `dev` does not have to exist yet: the trunk alone satisfies
+  the model, so `publish` releases from `main` and pushes only what exists. Once
+  `dev` has been created it also has to exist as `origin/dev`, and whichever of
+  the two lags is fast-forwarded onto the other before the tag, so a release
+  always leaves them at one commit.
 
-Either way the gate refuses a branch it was not told about, a branch missing
-locally or on origin, two branches that have diverged, and a push that would not
-fast-forward. What a single branch cannot do is notice that a development branch
-was left behind: merging `dev` into `main` stays your job, and the pair exists
-to make it the gate's job instead.
+Either way the gate refuses a branch it was not told about, a branch it has to
+push that is missing on origin, two branches that have diverged, and a push that
+would not fast-forward. What a single branch cannot do is notice that a
+development branch was left behind: merging `dev` into `main` stays your job,
+and the pair exists to make it the gate's job instead.
 
 Switching to the pair is one line in `pyproject.toml` plus the branch itself:
 

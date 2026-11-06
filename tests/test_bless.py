@@ -259,7 +259,7 @@ def test_branch_plan_fast_forwards_the_lagging_branch():
         return older == 'a' or older == newer
 
     plan = bless.branch_plan('dev', tips, is_ancestor)
-    assert plan == {'align': 'main'}
+    assert plan == {'align': 'main', 'release': ('main', 'dev')}
 
 
 def test_a_one_branch_model_aligns_nothing():
@@ -267,7 +267,7 @@ def test_a_one_branch_model_aligns_nothing():
     # the single fast-forward check and nothing else.
     plan = bless.branch_plan('main', {'main': 'a', 'origin/main': 'a'},
                              lambda older, newer: True, ('main',))
-    assert plan == {'align': None}
+    assert plan == {'align': None, 'release': ('main',)}
 
 
 def test_a_one_branch_model_still_refuses_what_it_was_not_told_about():
@@ -278,6 +278,29 @@ def test_a_one_branch_model_still_refuses_what_it_was_not_told_about():
     plan = bless.branch_plan('main', {'main': 'a'},
                              lambda older, newer: True, ('main',))
     assert 'origin/main' in plan['refusal']
+
+
+def test_a_missing_development_branch_releases_from_the_trunk():
+    # `branches = ["main", "dev"]` with no `dev` yet: the model is satisfied by
+    # the trunk, so bless publishes from main and pushes nothing that is absent.
+    tips = {'main': 'a', 'origin/main': 'a'}
+
+    plan = bless.branch_plan('main', tips, lambda older, newer: True)
+    assert plan == {'align': None, 'release': ('main',)}
+    assert bless.push_references('main', '2.1.1', plan['release']) == ['main', 'v2.1.1']
+
+
+def test_a_missing_development_branch_does_not_open_the_third_branch():
+    plan = bless.branch_plan('topic', {'main': 'a', 'origin/main': 'a'},
+                             lambda older, newer: True)
+    assert 'topic' in plan['refusal']
+
+
+def test_an_existing_development_branch_must_still_be_pushed():
+    # Once `dev` exists it is part of the release, so an unpushed one refuses.
+    tips = {'main': 'a', 'dev': 'a', 'origin/main': 'a'}
+    plan = bless.branch_plan('main', tips, lambda older, newer: True)
+    assert 'origin/dev' in plan['refusal']
 
 
 def test_the_push_is_the_declared_branches_and_the_tag(monkeypatch):
