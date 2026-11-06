@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 """bless -- the only path to a PyPI upload for this project.
 
-    ./bless            run every gate, then ask: test, publish, or stop
+    ./bless              run every gate, then ask: test, publish, or stop
+    ./bless --branch-plan  print the branch plan as JSON and exit
 
-There is no argument and no flag that skips a stage: the gate runs first and it
-always runs, because publishing is a single intent or it does not happen.  When
-it passes, bless prints everything that is in hand and then prompts
+No argument skips a stage: the gate runs first and it always runs, because
+publishing is a single intent or it does not happen.  `--branch-plan` is not an
+exception to that, because it does not enter the gate at all.  It answers one
+question about this tree -- which branches `publish` would move, or why it
+would refuse -- as a single JSON object on stdout, then exits: no index read,
+no gates, no build, no prompt, no network, so it works in a tree whose `.venv`
+is missing.  It exits 0 whenever it answers, including when the answer is a
+refusal, because a refusal is data here and not a failure.  `bt` asks this
+before it installs anything, and keeps its own copy of the policy for the
+projects whose vendored `bless` is older than the flag.
+
+When the gate passes, bless prints everything that is in hand and then prompts
 
     ====> Enter test or publish or quit:
 
@@ -163,6 +173,10 @@ DEFAULT_INSPECTOR = 'tests/inspect_dist.py'
 # otherwise.  Two names mean "align the development branch with the trunk
 # before tagging"; one name means "release from this branch, align nothing".
 DEFAULT_BRANCHES = ('main', 'dev')
+# The shape of `--branch-plan`'s report.  Bumped when a key changes meaning, so
+# a caller that reads it can refuse a shape it was not written for instead of
+# misreading one.
+PLAN_SCHEMA = 1
 
 # What a throwaway build must not copy out of the tree.
 COPY_EXCLUDES = ('.git', 'build', 'dist', '.venv', 'env', 'venv', '__pycache__',
@@ -755,6 +769,78 @@ def branch_stage(branch: str,
     return plan
 
 
+def _plan_state(current: str | None, tips: dict[str, str | None], plan: dict,
+                branches: tuple[str, ...], diverged: bool) -> str:
+    """Which row of the plan table this is, in one word a caller can switch on.
+
+    `branch_plan` stays the authority -- this only names what it decided, so a
+    caller can choose its own sentences and its own severity without parsing
+    the refusal text.  `diverged` is the one fact the plan does not carry
+    separately, because it only ever appears inside a refusal.
+    """
+    if current is None:
+        return 'detached'
+    if current not in branches:
+        return 'off-branch'
+    trunk, *development = branches
+    if not tips.get(trunk):
+        return 'no-trunk'
+    if 'refusal' in plan:
+        if diverged:
+            return 'diverged'
+        if any(tips.get(name) and not tips.get(f'origin/{name}')
+               for name in branches):
+            return 'unpushed'
+        return 'refused'
+    if plan['align']:
+        return 'align'
+    if development and not tips.get(development[0]):
+        return 'missing-dev'
+    if len(plan['release']) > 1:
+        return 'same'
+    return 'single'
+
+
+def plan_report() -> dict:
+    """`--branch-plan`: the branch plan as data, and nothing else.
+
+    The report is the same `branch_plan()` table `publish` obeys, annotated
+    with the facts a caller needs to say it in its own words: the tips of every
+    ref the model names, the branches that exist but are not on origin, and
+    `state`, one word naming which row of that table this is.
+    """
+    branches = PROJECT['branches']
+    branch = git('rev-parse', '--abbrev-ref', 'HEAD')
+    current = None if branch == 'HEAD' else branch
+    names = [*branches, *(f'origin/{name}' for name in branches)]
+    tips = {name: _maybe_rev(name) for name in names}
+
+    def is_ancestor(older: str, newer: str) -> bool:
+        return run(['git', 'merge-base', '--is-ancestor', older, newer],
+                   capture=True).returncode == 0
+
+    plan = branch_plan(current, tips, is_ancestor, branches)
+    trunk, *development = branches
+    second = development[0] if development else None
+    diverged = bool(second and tips.get(trunk) and tips.get(second)
+                    and tips[trunk] != tips[second]
+                    and not is_ancestor(tips[trunk], tips[second])
+                    and not is_ancestor(tips[second], tips[trunk]))
+    return {
+        'schema': PLAN_SCHEMA,
+        'project': NAME,
+        'branch': current,
+        'branches': list(branches),
+        'tips': tips,
+        'unpushed': [name for name in branches
+                     if tips.get(name) and not tips.get(f'origin/{name}')],
+        'state': _plan_state(current, tips, plan, branches, diverged),
+        'reason': plan.get('refusal'),
+        'align': plan.get('align'),
+        'release': list(plan.get('release') or ()),
+    }
+
+
 def align_branches(plan: dict, branch: str) -> None:
     if not plan['align']:
         return
@@ -1073,6 +1159,20 @@ def ask_mode() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if '--branch-plan' in argv:
+        try:
+            if len(argv) > 1:
+                raise BlessError(
+                    '--branch-plan takes no other argument: it reports this '
+                    'tree\'s branch plan and exits, without a mode and '
+                    'without the gate')
+            print(json.dumps(plan_report(), indent=2))
+        except BlessError as exc:
+            print(f'bless: refused: {exc}', file=sys.stderr)
+            return 1
+        return 0
+
     parser = argparse.ArgumentParser(
         prog='bless',
         description='Run every gate on this tree, then ask what to do with a '

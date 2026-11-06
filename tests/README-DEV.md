@@ -184,14 +184,23 @@ and the shared half lives in
 
 ## Notes on this adoption
 
+* This section is one run of
+  [`../../blessd/docs/adopting.md`](../../blessd/docs/adopting.md), which is the
+  procedure written for whoever converts the next project. If the two ever
+  disagree, that document is the procedure and this is the record of one run.
 * [`bless`](../bless) is emitted, byte for byte, from
   [`../../blessd/bless`](../../blessd/bless) -- SHA-256
-  `104a6eff6c22981d47b08853bb86ff87f3425847963f6044c2f07fce0c757d4f` when this
+  `3ef60e9e806ca58a3d900dd6622bb8be0052210da1ef26f9918bf0a1deb1e3b2` when this
   was written. It is not edited here: a change is made in `blessd` and re-emitted
   with `python3 ../../blessd/build.py --into .`, which replaces the file and
   prints the new hash. Reuse used to be "copy verbatim" by hand, and the copies
   drifted into three versions -- one of them unable to release a project whose
   model is `branches = ["main"]`.
+* That build also gives the gate a read-only query mode,
+  `./bless --branch-plan`, which prints this tree's branch plan as JSON without
+  running a single gate. `bt` asks with it, and keeps its own copy of the policy
+  for projects whose `bless` is older than the flag, so the branch note `bt`
+  prints and the plan `publish` obeys are the same answer from the same code.
 * `efibootdude` needed five things: one version location
   (`dynamic = ["version"]`), an inspector, the `dev` extra with `build`,
   `twine>=7` and `packaging>=26`, a console script that answers `--version`, and
