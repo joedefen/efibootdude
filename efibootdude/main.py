@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 efibootdude - Interactive TUI wrapper for efibootmgr
 
@@ -34,20 +33,22 @@ Workflow:
 # pylint: disable=wrong-import-position,wrong-import-order
 # pylint: disable=too-many-locals,line-too-long
 
-import os
-import sys
-import re
-import shutil
-import copy
-from dataclasses import dataclass, field
-from typing import Optional
-import subprocess
-import shlex
-import traceback
-import curses as cs
 import argparse
+import copy
+import curses as cs
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import traceback
+from dataclasses import dataclass, field
+
 # import xml.etree.ElementTree as ET
-from console_window import ConsoleWindow, ConsoleWindowOpts, OptionSpinner, Theme, InlineConfirmation
+from console_window import ConsoleWindow, ConsoleWindowOpts, InlineConfirmation, OptionSpinner, Theme
+
+from . import __version__
 
 # Use slots for memory efficiency and typo protection.
 # (``slots=True`` requires Python 3.10+; the project floor is now 3.11.)
@@ -110,10 +111,10 @@ class BootModifications:
     """
     dirty: bool = False
     order: bool = False
-    timeout: Optional[str] = None
+    timeout: str | None = None
     removes: set = field(default_factory=set)
     tags: dict = field(default_factory=dict)
-    next: Optional[str] = None
+    next: str | None = None
     actives: set = field(default_factory=set)
     inactives: set = field(default_factory=set)
     copies: list = field(default_factory=list)
@@ -154,7 +155,7 @@ class SystemInfo:
     def get_mounts():
         """Get a dictionary of device-to-mount-point"""
         mounts = {}
-        with open('/proc/mounts', 'r', encoding='utf-8') as mounts_file:
+        with open('/proc/mounts', encoding='utf-8') as mounts_file:
             for line in mounts_file:
                 parts = line.split()
                 dev = SystemInfo._unescape_mount(parts[0])
@@ -308,7 +309,7 @@ class EfiBootDude:
         if self.testfile:
             # if given a "testfile" (which should be just the
             # raw output of 'efibootmgr'), then parse it
-            with open(self.testfile, 'r', encoding='utf-8') as fh:
+            with open(self.testfile, encoding='utf-8') as fh:
                 # splitlines() (not readlines()) keeps this parse path identical
                 # to the live efibootmgr path below, which also has no line
                 # terminators.  Otherwise the trailing newline leaks into the
@@ -765,7 +766,7 @@ class EfiBootDude:
             else:
                 line += f' [{key[0]}]{key[1:]}:{verb}'
         line += ' [v]:terse' if self.opts.verbose else ' [v]erbose'
-        # line += f' [T]heme={self.opts.theme}'
+        line += f' [T]heme={self.opts.theme}'
         line += ' [?]:help [q]uit'
         return line[1:]
 
@@ -1131,6 +1132,13 @@ class EfiBootDude:
 
 def main():
     """ The program """
+    # `--version` answers before the curses screen and before any efibootmgr
+    # call: it is the smoke check `./bless` runs on the wheel it just built,
+    # and it has to work as an ordinary user on a machine with no saved state.
+    if '--version' in sys.argv[1:]:
+        print(f'efibootdude {__version__}')
+        return
+
     parser = argparse.ArgumentParser()
     parser.add_argument('testfile', nargs='?', default=None)
     opts = parser.parse_args()

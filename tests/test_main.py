@@ -11,7 +11,6 @@ Covered:
 import os
 
 import pytest
-
 from efibootdude.main import BootEntry, BootModifications, EfiBootDude, SystemInfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))

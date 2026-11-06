@@ -132,3 +132,4 @@ This project was inspired by [Elinvention/efiboots](https://github.com/Elinventi
 * to be easier to install especially when not in your distro's repos.
 * to clearly present the partition of the boot entries (as a mount point if mounted and, otherwise, the device pathname).
 * to show the underlying commands being run for education, for verification, and for help on investigating issues.
+
