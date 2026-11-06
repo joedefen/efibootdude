@@ -111,13 +111,22 @@ dev = [
 [project.scripts]
 efibootdude = "efibootdude.main:main"
 
-# No [tool.bless] table is needed: the defaults line up with this project.
-# `./bless` reads the distribution name from `[project] name` ("efibootdude"),
-# the package holding `__version__` from that name with `-` and `.` turned into
-# `_` ("efibootdude"), the console script from the first `[project.scripts]`
-# entry ("efibootdude") and the inspector from `tests/inspect_dist.py`.  Only a
-# project that differs from those defaults needs `module`, `inspect`,
-# `smoke_args` or `smoke_expect` written down here.
+[tool.bless]
+# The branch model `./bless` keeps.  `["main"]` releases from the trunk alone;
+# `["main", "dev"]` -- the default when this table says nothing -- requires a
+# `dev` branch both locally and on origin, and fast-forwards whichever of the
+# two lags onto the other before tagging.  This project releases from `main`
+# only, so a small change can be published without creating and pushing `dev`
+# first.  The cost is explicit: with one branch, `bless` cannot tell you that
+# `dev` was left behind, so merging it back stays the maintainer's job.
+branches = ["main"]
+
+# The rest is derived rather than written here: the distribution name comes
+# from `[project] name` ("efibootdude"), the package holding `__version__` from
+# that name with `-` and `.` turned into `_` ("efibootdude"), the console script
+# from the first `[project.scripts]` entry ("efibootdude") and the inspector
+# from `tests/inspect_dist.py`.  Only a project that differs needs `module`,
+# `inspect`, `smoke_args` or `smoke_expect` written down here.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

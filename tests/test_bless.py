@@ -69,6 +69,20 @@ def test_the_tool_table_overrides_the_derivation(tmp_path):
     assert bless.identity(root)['module'] == 'odd_name'
 
 
+def test_the_branch_model_defaults_to_the_pair(tmp_path):
+    # A project that says nothing about branches gets the model bless documents:
+    # a trunk and a development branch, aligned before the tag.
+    root = make_project(tmp_path / 'pair', 'pair-proj')
+    assert bless.identity(root)['branches'] == ('main', 'dev')
+
+
+def test_a_malformed_branch_model_is_refused():
+    for declared in ([], ['main', 'main'], ['main', 'dev', 'extra'], 'main',
+                     ['main', '']):
+        with pytest.raises(bless.BlessError, match='one branch name or two'):
+            bless._branches(declared)
+
+
 def test_a_missing_package_is_refused_with_both_remedies(tmp_path):
     (tmp_path / 'pyproject.toml').write_text('[project]\nname = "nope"\n')
 
@@ -101,6 +115,8 @@ def test_this_tree_derives_its_own_identity():
     assert bless.PROJECT['console'] in list(PROJECT['scripts'])
     assert bless.PROJECT['console'] == 'efibootdude'
     assert bless.PROJECT['inspector'] == 'tests/inspect_dist.py'
+    # This tree releases from the trunk alone; the pair is one line away.
+    assert bless.PROJECT['branches'] == ('main',)
     assert bless.PYPI_URL == f'https://pypi.org/pypi/{name}/json'
     assert bless.TESTPYPI_URL == f'https://test.pypi.org/pypi/{name}/json'
     assert bless.read_version() == VERSION
@@ -219,7 +235,7 @@ def test_the_gate_compiles_and_covers_the_derived_package(monkeypatch):
     assert f'--cov={bless.MODULE}' in testing
 
 
-# --- the branch plan: main and dev must end on one commit -----------------
+# --- the branch plan: the declared branches must end on one commit --------
 
 def test_branch_plan_refuses_a_detached_head_and_a_third_branch():
     assert 'detached HEAD' in bless.branch_plan(None, {}, lambda a, b: False)['refusal']
@@ -244,6 +260,32 @@ def test_branch_plan_fast_forwards_the_lagging_branch():
 
     plan = bless.branch_plan('dev', tips, is_ancestor)
     assert plan == {'align': 'main'}
+
+
+def test_a_one_branch_model_aligns_nothing():
+    # `branches = ["main"]`: there is no second branch to move, so the plan is
+    # the single fast-forward check and nothing else.
+    plan = bless.branch_plan('main', {'main': 'a', 'origin/main': 'a'},
+                             lambda older, newer: True, ('main',))
+    assert plan == {'align': None}
+
+
+def test_a_one_branch_model_still_refuses_what_it_was_not_told_about():
+    plan = bless.branch_plan('dev', {'main': 'a', 'origin/main': 'a'},
+                             lambda older, newer: True, ('main',))
+    assert 'dev' in plan['refusal']
+
+    plan = bless.branch_plan('main', {'main': 'a'},
+                             lambda older, newer: True, ('main',))
+    assert 'origin/main' in plan['refusal']
+
+
+def test_the_push_is_the_declared_branches_and_the_tag(monkeypatch):
+    monkeypatch.setitem(bless.PROJECT, 'branches', ('main', 'dev'))
+    assert bless.push_references('dev', '2.1.1') == ['dev', 'main', 'v2.1.1']
+
+    monkeypatch.setitem(bless.PROJECT, 'branches', ('main',))
+    assert bless.push_references('main', '2.1.1') == ['main', 'v2.1.1']
 
 
 # --- the shared inspector ------------------------------------------------

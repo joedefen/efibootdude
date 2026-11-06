@@ -22,10 +22,11 @@ The version lives in exactly one place. `pyproject.toml` declares
 `dynamic = ["version"]`, so flit reads `efibootdude/__init__.py`; a
 `X.Y.Z.99.N` rehearsal rewrites that line only inside a throwaway copy.
 
-No `[tool.bless]` table is needed: everything is derived from what is already
-there -- `NAME = efibootdude`, `MODULE = efibootdude`, the console script from
-the first `[project.scripts]` entry (`efibootdude`), and the inspector at
-`tests/inspect_dist.py`.
+Almost nothing needs a `[tool.bless]` table: `NAME = efibootdude`,
+`MODULE = efibootdude`, the console script and the inspector are all derived
+from what is already there. The one setting written out is `branches`, which
+names the branches `publish` releases from -- see
+[the branch model](#the-branch-model-is-a-setting-not-a-convention) below.
 
 ## The test gate
 
@@ -83,9 +84,9 @@ again. Enter, `quit` or Ctrl-C stops with nothing tagged, uploaded or pushed.
 6. **check** -- `twine check --strict` on both files.
 7. **smoke** -- installs the built wheel into a throwaway venv and runs
    `efibootdude --version`, which must print the version being released.
-8. **branch plan** -- refuses a detached HEAD, a branch other than `main` or
-   `dev`, missing local or origin branches, diverged `main`/`dev`, or a push
-   that would not fast-forward.
+8. **branch plan** -- refuses a detached HEAD, a branch that is not one of the
+   release branches, a release branch missing locally or on origin, two
+   branches that have diverged, or a push that would not fast-forward.
 
 **`test`** is the rehearsal and never spends the working version. It copies the
 tree to `build/bless-test-<version>/src`, rewrites `__version__` to
@@ -96,9 +97,9 @@ prints the install line, which needs `python -m pip cache purge` first and
 `--extra-index-url https://pypi.org/simple/`, because TestPyPI carries no
 dependencies.
 
-**`publish`** fast-forwards `main` and `dev` to one commit, tags `vX.Y.Z`,
-uploads the two inspected files to PyPI, verifies the index, and pushes `main`,
-`dev` and the tag.
+**`publish`** fast-forwards the release branches to one commit, tags `vX.Y.Z`,
+uploads the two inspected files to PyPI, verifies the index, and pushes those
+branches and the tag.
 
 **Credentials** are resolved per index -- `TWINE_PASSWORD` for PyPI,
 `TWINE_TESTPYPI_PASSWORD` for TestPyPI, each overruling the `~/.pypirc` section
@@ -115,13 +116,30 @@ There is no CI publish job, on purpose: the upload is irreversible and is run by
 the owner from the development tree, so the safety lives in one inspectable
 command. CI stays a gate.
 
-The branch model is part of the gate, not a convention: `bless` publishes only
-from `main` or `dev` and refuses unless *both* exist locally and as
-`origin/main` and `origin/dev`. This repository had only `main` when the gate
-was adopted, so the pair was created once:
+## The branch model is a setting, not a convention
+
+`bless` publishes only from a branch it was told about, and pushes every branch
+it was told about. Which ones those are is `[tool.bless] branches` in
+[`pyproject.toml`](../pyproject.toml), and there are two shapes:
+
+* `branches = ["main"]` -- one release branch. Nothing is aligned, and `publish`
+  pushes `main` and the tag. This is what this project uses, so a small change
+  can be published straight from the trunk.
+* `branches = ["main", "dev"]` -- the default when the setting is absent. Both
+  must exist locally and as `origin/main` and `origin/dev`, and whichever of the
+  two lags is fast-forwarded onto the other before the tag, so a release always
+  leaves them at one commit.
+
+Either way the gate refuses a branch it was not told about, a branch missing
+locally or on origin, two branches that have diverged, and a push that would not
+fast-forward. What a single branch cannot do is notice that a development branch
+was left behind: merging `dev` into `main` stays your job, and the pair exists
+to make it the gate's job instead.
+
+Switching to the pair is one line in `pyproject.toml` plus the branch itself:
 
     git branch dev
-    git push -u origin main dev
+    git push -u origin dev
 
 ## What the inspector asserts
 
@@ -153,21 +171,24 @@ Run it by hand on any built pair:
 3. Answer `test` to rehearse on TestPyPI, then run `./bless` again and answer
    `publish` -- or go straight to `publish`.
 
-`main` and `dev` must both exist and both track origin; `publish` leaves them at
-the tagged commit. Everything else about the release is one of the stages above.
+`[tool.bless] branches` names what `publish` pushes, and each of those branches
+must exist and track origin; `publish` leaves them all at the tagged commit.
+With `["main"]` that is one branch, with `["main", "dev"]` it is the pair.
+Everything else about the release is one of the stages above.
 
 ## Notes on this adoption
 
-* [`bless`](../bless) was copied byte-for-byte from `../../dwipe/bless` (SHA-256
-  `dead17db4d26e70a3e7b16fa2438a5a18a3d4f4dc05f7442ce718efaa1872082`) and is
-  not edited here: reuse is "copy verbatim", and any later upstream change is
-  adopted as a new copy.
+* [`bless`](../bless) is a byte-for-byte copy of `../../dwipe/bless` (SHA-256
+  `2acf524461de07f0b6cc9dff986388b92e3c6bc6bfaded6520b040f55515b3f6`) and is not
+  edited here: reuse is "copy verbatim", and any later upstream change is
+  adopted as a new copy. The one-branch/two-branch setting was added to
+  `dwipe/bless` first for exactly that reason, so both projects keep one file.
 * `efibootdude` needed five things: one version location
   (`dynamic = ["version"]`), an inspector, the `dev` extra with `build`,
   `twine>=7` and `packaging>=26`, a console script that answers `--version`, and
-  the `dev` branch the branch plan requires. The metadata moved to the PEP 639
-  `license` expression and `license-files` at the same time, which is why the
-  build backend floor is `flit_core>=3.12`.
+  a branch model for the branch plan -- here `branches = ["main"]`. The metadata
+  moved to the PEP 639 `license` expression and `license-files` at the same
+  time, which is why the build backend floor is `flit_core>=3.12`.
 * The ruff rule set was added with the gate, so the whole tree was brought to a
   clean `ruff check .` once. [`tests/test_bless.py`](test_bless.py) and
   [`tests/test_repo_hygiene.py`](test_repo_hygiene.py) keep the gate, the

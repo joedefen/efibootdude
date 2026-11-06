@@ -56,6 +56,14 @@ def test_the_dev_extra_installs_the_release_toolchain():
     assert 'packaging>=26' in joined
 
 
+def test_the_branch_model_is_declared_and_documented():
+    # `publish` pushes exactly the branches named here, so the setting has to
+    # exist and the developer note has to say what it chooses.
+    branches = pyproject()['tool']['bless']['branches']
+    assert 1 <= len(branches) <= 2, branches
+    assert 'branches' in DEV_DOC.read_text(encoding='utf-8')
+
+
 def test_the_release_gate_exists_and_the_dev_document_names_it():
     gate = ROOT / 'bless'
     assert gate.is_file(), 'the release gate is missing'
