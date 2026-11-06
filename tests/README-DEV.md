@@ -1,22 +1,22 @@
 # efibootdude: working on the source tree
 
-This is the developer companion to [`README.md`](README.md), which documents the
-tool for its users. Here we document the two things a maintainer needs and a
+This is the developer companion to [`README.md`](../README.md), which documents
+the tool for its users. Here we document the two things a maintainer needs and a
 user does not: the **test gate** and the **release gate** (`./bless`).
 
-Every path below is relative to the repository root, and the commands are
-written to be run from there.
+This file lives in `tests/`, so its links point one directory up. The commands
+assume the repository root, which is where the gate has to be run.
 
 ## Layout and single sources of truth
 
 | Path | Owns |
 | --- | --- |
-| [`efibootdude/__init__.py`](efibootdude/__init__.py) | `__version__`, and nothing else. The build backend reads it, `efibootdude --version` prints it, `bless` reads the line without importing the package. |
-| [`pyproject.toml`](pyproject.toml) | Name, description, keywords, `requires-python`, runtime dependencies, the SPDX `license` and `license-files`, the `test`/`dev` extras, and the pytest, coverage and ruff configuration. |
-| [`bless`](bless) | The release gate. Copied verbatim from `../dwipe/bless`; it holds no copy of this project's identity. |
-| [`tests/inspect_dist.py`](tests/inspect_dist.py) | The distribution inspector. `bless` refuses to upload a wheel and sdist it has not inspected with this file. |
-| [`runner`](runner) | Runs the tree from source (`python -m efibootdude.main`) for debugging. |
-| [`.gitignore`](.gitignore) | Keeps gate artifacts (`build/`, `dist/`, `.coverage*`, caches, `*.whl`, `*.tar.gz`) out of `git status`, because the gate refuses a dirty tree. |
+| [`efibootdude/__init__.py`](../efibootdude/__init__.py) | `__version__`, and nothing else. The build backend reads it, `efibootdude --version` prints it, `bless` reads the line without importing the package. |
+| [`pyproject.toml`](../pyproject.toml) | Name, description, keywords, `requires-python`, runtime dependencies, the SPDX `license` and `license-files`, the `test`/`dev` extras, and the pytest, coverage and ruff configuration. |
+| [`bless`](../bless) | The release gate. Copied verbatim from `../../dwipe/bless`; it holds no copy of this project's identity. |
+| [`tests/inspect_dist.py`](inspect_dist.py) | The distribution inspector. `bless` refuses to upload a wheel and sdist it has not inspected with this file. |
+| [`runner`](../runner) | Runs the tree from source (`python -m efibootdude.main`) for debugging. |
+| [`.gitignore`](../.gitignore) | Keeps gate artifacts (`build/`, `dist/`, `.coverage*`, caches, `*.whl`, `*.tar.gz`) out of `git status`, because the gate refuses a dirty tree. |
 
 The version lives in exactly one place. `pyproject.toml` declares
 `dynamic = ["version"]`, so flit reads `efibootdude/__init__.py`; a
@@ -57,7 +57,7 @@ The ruff selection is committed rather than inherited
 what the gate enforces.
 
 `efibootdude --version` is answered before the curses screen is touched
-([`main()`](efibootdude/main.py:1133)), because the smoke stage of the release
+([`main()`](../efibootdude/main.py:1133)), because the smoke stage of the release
 gate runs it as an ordinary user on a machine with no saved state.
 
 ## The release gate: `./bless`
@@ -125,8 +125,8 @@ was adopted, so the pair was created once:
 
 ## What the inspector asserts
 
-[`tests/inspect_dist.py`](tests/inspect_dist.py) is the one implementation,
-used by `bless` and, once CI is wired up, by CI; expectations are read from
+[`tests/inspect_dist.py`](inspect_dist.py) is the one implementation, used by
+`bless` and, once CI is wired up, by CI; expectations are read from
 `pyproject.toml` and the package, never from the artifact under test.
 
 * **wheel** -- `Name`, `Version`, `Summary`, `Requires-Python`, `Keywords`,
@@ -147,8 +147,8 @@ Run it by hand on any built pair:
 
 ## Releasing, in three steps
 
-1. Bump `__version__` in [`efibootdude/__init__.py`](efibootdude/__init__.py) and
-   commit.
+1. Bump `__version__` in [`efibootdude/__init__.py`](../efibootdude/__init__.py)
+   and commit.
 2. Run `./bless`. The gate runs in full.
 3. Answer `test` to rehearse on TestPyPI, then run `./bless` again and answer
    `publish` -- or go straight to `publish`.
@@ -158,7 +158,7 @@ the tagged commit. Everything else about the release is one of the stages above.
 
 ## Notes on this adoption
 
-* [`bless`](bless) was copied byte-for-byte from `../dwipe/bless` (SHA-256
+* [`bless`](../bless) was copied byte-for-byte from `../../dwipe/bless` (SHA-256
   `dead17db4d26e70a3e7b16fa2438a5a18a3d4f4dc05f7442ce718efaa1872082`) and is
   not edited here: reuse is "copy verbatim", and any later upstream change is
   adopted as a new copy.
@@ -169,8 +169,8 @@ the tagged commit. Everything else about the release is one of the stages above.
   `license` expression and `license-files` at the same time, which is why the
   build backend floor is `flit_core>=3.12`.
 * The ruff rule set was added with the gate, so the whole tree was brought to a
-  clean `ruff check .` once. [`tests/test_bless.py`](tests/test_bless.py) and
-  [`tests/test_repo_hygiene.py`](tests/test_repo_hygiene.py) keep the gate, the
+  clean `ruff check .` once. [`tests/test_bless.py`](test_bless.py) and
+  [`tests/test_repo_hygiene.py`](test_repo_hygiene.py) keep the gate, the
   inspector and the single version location from drifting.
 * CI is not wired up yet. When it is, it must run the same three gate commands
   and the same inspector, never an equivalent.

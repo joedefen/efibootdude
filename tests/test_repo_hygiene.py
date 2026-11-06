@@ -56,15 +56,16 @@ def test_the_dev_extra_installs_the_release_toolchain():
     assert 'packaging>=26' in joined
 
 
-def test_the_release_gate_exists_and_the_documents_name_it():
+def test_the_release_gate_exists_and_the_dev_document_names_it():
     gate = ROOT / 'bless'
     assert gate.is_file(), 'the release gate is missing'
     assert gate.stat().st_mode & 0o111, './bless must be executable'
 
-    for document in (ROOT / 'README.md', DEV_DOC):
-        text = document.read_text(encoding='utf-8')
-        assert 'bless' in text, document
-        assert './release' not in text, document
+    # README.md stays about using the tool; the gate is a maintainer concern and
+    # is documented only in the developer note under tests/.
+    text = DEV_DOC.read_text(encoding='utf-8')
+    assert 'bless' in text, DEV_DOC
+    assert './release' not in text, DEV_DOC
 
 
 def test_no_documented_command_uploads_the_whole_dist_directory():
