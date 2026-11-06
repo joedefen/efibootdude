@@ -41,7 +41,11 @@ project names at one commit and tags it, so `publish` aligns them here instead
 of asking the owner to remember.  `main` and `dev` is the default; `main` alone
 is the supported model for a project that commits straight to the trunk.
 
-How to reuse: copy this file to another project's root.  Nothing about this
+How to reuse: this file is emitted verbatim by `build.py` in the `blessd`
+repository and vendored at a project's root.  Edit it in `blessd` and re-emit;
+never edit a project's copy, because the copy is what that project releases
+with and nothing in the copy can tell you it has fallen behind.  `sha256sum
+bless` matches a project's copy to the build it came from.  Nothing about the
 project is written into it -- `identity()` reads the whole of it from
 `pyproject.toml` at start-up:
 

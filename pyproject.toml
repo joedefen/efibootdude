@@ -36,9 +36,11 @@
 # the JSON index the answer would write to before anything is built, and
 # refuses a version that is already published, because an upload cannot be
 # replaced.  `test` rehearses on test.pypi.org with a throwaway X.Y.Z.99.N
-# built from a copy of the tree; `publish` makes `main` and `dev` one commit,
-# tags it vX.Y.Z, uploads the two inspected files to PyPI and pushes.  See
-# tests/README-DEV.md for the stages, the credentials and the release checklist.
+# built from a copy of the tree; `publish` aligns the branches `[tool.bless]
+# branches` names -- `main` alone here -- tags the result vX.Y.Z, uploads the
+# two inspected files to PyPI and pushes.  See tests/README-DEV.md for the
+# stages, the credentials and the release checklist, and ../../blessd/docs/
+# release-strategy.md for the strategy every project shares.
 
 [build-system]
 # 3.12 is the first flit_core release that understands the PEP 639 `license`

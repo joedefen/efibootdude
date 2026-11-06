@@ -13,7 +13,8 @@ assume the repository root, which is where the gate has to be run.
 | --- | --- |
 | [`efibootdude/__init__.py`](../efibootdude/__init__.py) | `__version__`, and nothing else. The build backend reads it, `efibootdude --version` prints it, `bless` reads the line without importing the package. |
 | [`pyproject.toml`](../pyproject.toml) | Name, description, keywords, `requires-python`, runtime dependencies, the SPDX `license` and `license-files`, the `test`/`dev` extras, and the pytest, coverage and ruff configuration. |
-| [`bless`](../bless) | The release gate. Copied verbatim from `../../dwipe/bless`; it holds no copy of this project's identity. |
+| [`bless`](../bless) | The release gate, emitted verbatim from [`../../blessd/bless`](../../blessd/bless) by that repo's `build.py`. It holds no copy of this project's identity, and it is never edited here. |
+| [`blessd/docs/release-strategy.md`](../../blessd/docs/release-strategy.md) | The release strategy every project shares: the branch model, the stages, the rehearsal, the credentials. This file documents only what is particular to `efibootdude`. |
 | [`tests/inspect_dist.py`](inspect_dist.py) | The distribution inspector. `bless` refuses to upload a wheel and sdist it has not inspected with this file. |
 | [`runner`](../runner) | Runs the tree from source (`python -m efibootdude.main`) for debugging. |
 | [`.gitignore`](../.gitignore) | Keeps gate artifacts (`build/`, `dist/`, `.coverage*`, caches, `*.whl`, `*.tar.gz`) out of `git status`, because the gate refuses a dirty tree. |
@@ -173,18 +174,24 @@ Run it by hand on any built pair:
 3. Answer `test` to rehearse on TestPyPI, then run `./bless` again and answer
    `publish` -- or go straight to `publish`.
 
-`[tool.bless] branches` names what `publish` pushes, and each of those branches
-must exist and track origin; `publish` leaves them all at the tagged commit.
-With `["main"]` that is one branch, with `["main", "dev"]` it is the pair.
-Everything else about the release is one of the stages above.
+`[tool.bless] branches` names what `publish` pushes. The trunk in that list must
+exist and track origin; a development branch joins the release once it exists,
+and from then on it has to exist on origin too. `publish` leaves every branch it
+pushes at the tagged commit: one branch with `["main"]`, the pair with
+`["main", "dev"]`. Everything else about the release is one of the stages above,
+and the shared half lives in
+[`blessd/docs/release-strategy.md`](../../blessd/docs/release-strategy.md).
 
 ## Notes on this adoption
 
-* [`bless`](../bless) is a byte-for-byte copy of `../../dwipe/bless` (SHA-256
-  `2acf524461de07f0b6cc9dff986388b92e3c6bc6bfaded6520b040f55515b3f6`) and is not
-  edited here: reuse is "copy verbatim", and any later upstream change is
-  adopted as a new copy. The one-branch/two-branch setting was added to
-  `dwipe/bless` first for exactly that reason, so both projects keep one file.
+* [`bless`](../bless) is emitted, byte for byte, from
+  [`../../blessd/bless`](../../blessd/bless) -- SHA-256
+  `104a6eff6c22981d47b08853bb86ff87f3425847963f6044c2f07fce0c757d4f` when this
+  was written. It is not edited here: a change is made in `blessd` and re-emitted
+  with `python3 ../../blessd/build.py --into .`, which replaces the file and
+  prints the new hash. Reuse used to be "copy verbatim" by hand, and the copies
+  drifted into three versions -- one of them unable to release a project whose
+  model is `branches = ["main"]`.
 * `efibootdude` needed five things: one version location
   (`dynamic = ["version"]`), an inspector, the `dev` extra with `build`,
   `twine>=7` and `packaging>=26`, a console script that answers `--version`, and
@@ -192,8 +199,11 @@ Everything else about the release is one of the stages above.
   moved to the PEP 639 `license` expression and `license-files` at the same
   time, which is why the build backend floor is `flit_core>=3.12`.
 * The ruff rule set was added with the gate, so the whole tree was brought to a
-  clean `ruff check .` once. [`tests/test_bless.py`](test_bless.py) and
-  [`tests/test_repo_hygiene.py`](test_repo_hygiene.py) keep the gate, the
+  clean `ruff check .` once. [`tests/test_bless.py`](test_bless.py) pins the
+  identity this tree derives and the inspector it uploads behind; what the gate
+  itself does -- branch plan, refusals, prompt, index check, emitter -- is
+  tested once, in [`../../blessd/tests/test_bless.py`](../../blessd/tests/test_bless.py).
+  [`tests/test_repo_hygiene.py`](test_repo_hygiene.py) keeps the gate, the
   inspector and the single version location from drifting.
 * CI is not wired up yet. When it is, it must run the same three gate commands
   and the same inspector, never an equivalent.
