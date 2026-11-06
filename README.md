@@ -29,7 +29,7 @@ Note: Copying a boot entry effectively adds a new entry with a different label. 
 
 After running `efibootdude` and making some changes, you'll see a screen comparable to this:
 ```
- wRITE down next tag *:inact copy rmv [v]erbose [T]heme ?:help quit
+ wRITE down next tag *:inact copy rmv [v]erbose ?:help quit
 ──────────────────────────────────────────────────────────────────────────────
    BootNext: ---
    BootCurrent: 0007
@@ -54,7 +54,8 @@ At this point
   * Type `c` to copy the boot entry with a new label (prompts for new name).
   * Type `r` to remove the boot entry.
   * Type `m` on the Timeout line to change the boot timeout in seconds.
-  * Type `T` to cycle through available themes.
+  * Type `T` to cycle through available themes (the theme key is listed on the
+    `?` help screen, not on the top line).
   * And so forth.
 * The entries with `*` on the left are active boot entries; toggle whether
   active by typing `*` for the corresponding entries.

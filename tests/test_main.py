@@ -234,19 +234,20 @@ def test_get_keys_line_uses_fancy_header_markup():
     from console_window.header import KEY, parse_fancy_header
 
     dude = make_dude()
-    dude.opts.theme = 'default'
     dude.actions = {'u': 'up', 'w': 'wRITE', '*': 'inact'}
 
     line = dude.get_keys_line()
 
     assert line == ('[u]p [w]RITE [*]:inact [v]erbose '
-                    '[T]heme=default [?]:help [q]uit')
+                    '[?]:help [q]uit')
     # The brackets are markup: the rendered text drops them, and every hot key
     # is a KEY span, so add_fancy_header(mode='Underline') styles them alike.
     spans = parse_fancy_header(line)
     assert ''.join(span.text for span in spans) == (
-        'up wRITE *:inact verbose Theme=default ?:help quit')
-    key_chars = {'u', 'w', '*', 'v', 'T', '?', 'q'}
+        'up wRITE *:inact verbose ?:help quit')
+    # Theme is advertised on the help screen only, never in this header.
+    assert 'T' not in ''.join(span.text for span in spans if span.role == KEY)
+    key_chars = {'u', 'w', '*', 'v', '?', 'q'}
     assert {span.text for span in spans if span.role == KEY} == key_chars
 
 

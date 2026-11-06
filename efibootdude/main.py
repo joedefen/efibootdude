@@ -246,6 +246,8 @@ class EfiBootDude:
         spin.add_key('modify', 'm - modify the value (on Timeout line)', genre='action')
         spin.add_key('write', 'w - write changes', genre='action')
         spin.add_key('boot', 'b - reboot the machine', genre='action')
+        # Registered so the help screen (?) lists it with its current value;
+        # get_keys_line() deliberately keeps it off the one-line header.
         spin.add_key('theme', 'T - cycle theme', vals=[
             'default', 'dark-mono', 'light-mono', 'nord'])
         spin.add_key('reset', 'ESC - reset edits and refresh',
@@ -275,6 +277,9 @@ class EfiBootDude:
         win_opts.head_rows = 10
         win_opts.min_cols_rows = (70,10)
         win_opts.ctrl_c_terminates = False
+        # The inline prompt's marker is app vocabulary: register both spellings
+        # so an ASCII-only terminal draws '>>>' instead of a missing glyph.
+        win_opts.glyphs = {'prompt_arrow': ('▸▸▸', '>>>')}
 
         self.win = ConsoleWindow(win_opts)
         self.win.pick_pos = self.boot_idx  # Start at first boot entry
@@ -713,7 +718,9 @@ class EfiBootDude:
                     if '+ADD' in line:
                         attr=cs.color_pair(Theme.SUCCESS)
                     elif entry.is_boot and entry.removed:
-                        attr=cs.color_pair(Theme.DANGER)
+                        # A pending removal is an edit, not an error: HOTSWAP
+                        # (orange) leaves DANGER red to mean "input needed".
+                        attr=cs.color_pair(Theme.HOTSWAP)
                     elif entry.is_boot and not entry.active:
                         # Dim inactive boot entries
                         attr=cs.A_DIM
@@ -734,13 +741,21 @@ class EfiBootDude:
                         else:
                             action_prompt = self._inline_action.upper() if self._inline_action else 'INPUT'
 
+                        # One colour for the whole prompt: DANGER red means
+                        # "the app is waiting on you", and it does not switch
+                        # when the first character is typed.  The triple
+                        # triangle marker is bold so the prompt is easy to
+                        # spot in a screen full of entry rows.
+                        arrow = self.win.glyph('prompt_arrow')
                         if not current_value and hint:
-                            prompt_line = f"  → {hint}"
-                            self.win.add_body(prompt_line, attr=cs.color_pair(Theme.WARNING))
+                            prompt_line = f'  {arrow} {hint}'
                         else:
                             cursor = '_'
-                            prompt_line = f"  → {action_prompt}: {current_value}{cursor}"
-                            self.win.add_body(prompt_line, attr=cs.color_pair(Theme.DANGER))
+                            prompt_line = (f'  {arrow} {action_prompt}: '
+                                           f'{current_value}{cursor}')
+                        self.win.add_body(
+                            prompt_line,
+                            attr=cs.color_pair(Theme.DANGER) | cs.A_BOLD)
 
             self.win.render(redraw=self.redraw)
             self.redraw = False
@@ -766,7 +781,9 @@ class EfiBootDude:
             else:
                 line += f' [{key[0]}]{key[1:]}:{verb}'
         line += ' [v]:terse' if self.opts.verbose else ' [v]erbose'
-        line += f' [T]heme={self.opts.theme}'
+        # Theme is a rarely used preference: the spinner option stays
+        # registered (so the help screen lists it with its current value), but
+        # it is not advertised on this one-line header.
         line += ' [?]:help [q]uit'
         return line[1:]
 
