@@ -9,7 +9,8 @@
 #   of the version is how published metadata drifts away from the code.
 # * Layout: the package is `efibootdude/` at the root and `efibootdude` is the
 #   console script (efibootdude.main:main).  `./runner` runs the same tree
-#   straight from source for debugging.
+#   straight from source under `.venv/bin/python` for debugging, without
+#   installing anything or taking over `~/.local/bin`.
 #
 # The gates
 # ---------
@@ -21,11 +22,13 @@
 #   python -m compileall -q efibootdude conftest.py tests
 #   python -m pytest -q --cov=efibootdude --cov-report=term-missing
 #
-# Install the toolchain into the checkout's virtualenv, which is also the
-# interpreter `./bless` must run under:
+# The toolchain lives in the checkout's virtualenv, which is also the
+# interpreter `./bless` must run under.  Build it with `bt`, which installs this
+# package editable plus the `dev` extra and the gate's tool floors; no step here
+# uses `pip --user`, and nothing is installed outside this tree:
 #
-#   python3 -m venv .venv
-#   .venv/bin/python -m pip install -e '.[dev]'
+#   bt penv            # rebuilds .venv around the tree
+#   .venv/bin/python ./bless
 #
 # Releasing
 # ---------

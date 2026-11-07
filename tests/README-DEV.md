@@ -16,7 +16,7 @@ assume the repository root, which is where the gate has to be run.
 | [`bless`](../bless) | The release gate, emitted verbatim from [`../../blessd/bless`](../../blessd/bless) by that repo's `build.py`. It holds no copy of this project's identity, and it is never edited here. |
 | [`blessd/docs/release-strategy.md`](../../blessd/docs/release-strategy.md) | The release strategy every project shares: the branch model, the stages, the rehearsal, the credentials. This file documents only what is particular to `efibootdude`. |
 | [`tests/inspect_dist.py`](inspect_dist.py) | The distribution inspector. `bless` refuses to upload a wheel and sdist it has not inspected with this file. |
-| [`runner`](../runner) | Runs the tree from source (`python -m efibootdude.main`) for debugging. |
+| [`runner`](../runner) | Runs the tree from source (`python -m efibootdude.main`) for debugging, under `.venv/bin/python`. It installs nothing and never writes to `~/.local/bin`, so it cannot displace a released `efibootdude`. |
 | [`.gitignore`](../.gitignore) | Keeps gate artifacts (`build/`, `dist/`, `.coverage*`, caches, `*.whl`, `*.tar.gz`) out of `git status`, because the gate refuses a dirty tree. |
 
 The version lives in exactly one place. `pyproject.toml` declares
@@ -29,13 +29,60 @@ from what is already there. The one setting written out is `branches`, which
 names the branches `publish` releases from -- see
 [the branch model](#the-branch-model-is-a-setting-not-a-convention) below.
 
+## Where the package lives
+
+This tree follows the per-project environment model: the package lives in the
+checkout, not in a shared site directory. Nothing here installs with
+`pip --user` any more, so no project can shadow another's dependency.
+
+| Thing | Where | Made by |
+| --- | --- | --- |
+| Editable package + this project's `dev` extra | `.venv/` in this tree | `bt penv` |
+| The runnable console script | `~/.local/bin/efibootdude` | `bt edit` (a symlink into `.venv/bin`) or `bt test` / `bt prod` / `pipx install` (pipx's own venv) |
+| A released artifact, isolated per app | `~/.local/share/pipx/venvs/efibootdude` | `bt test` / `bt prod` |
+
+Two invariants:
+
+1. `.venv` is the **editable/debug** environment: the interpreter VS Code
+   selects and the one `./bless`, pytest and a debugger run under, so
+   breakpoints land in the tree. It holds an editable install
+   (`-e '.[dev]'`), never a built copy.
+2. Exactly **one owner** of `~/.local/bin/efibootdude` at a time -- `bt edit`
+   links it into `.venv/bin`, `bt test`/`bt prod` let pipx own it -- and no
+   command claims it with `pip --user`.
+
+Run the source without owning the entry point:
+
+    ./runner                      # re-execs into .venv/bin/python
+    .venv/bin/python ./runner     # the same, spelled out
+
+`runner` installs nothing and never writes to `~/.local/bin`, so a source run
+and a released install cannot collide. When the command on `PATH` should follow
+the tree instead, hand the entry point to it:
+
+    bt edit        # ~/.local/bin/efibootdude -> .venv/bin/efibootdude
+
+`bt edit` and `bt test`/`bt prod` are a switch, not two installs: the last one
+run owns the link. Do not `pipx install --editable` for this project; that
+would create a second editable install `bt edit` does not manage. `bt status`
+prints the owner, pipx's own record, the editable `.venv` and the VS Code
+interpreter, plus any leftover copy from the old model that `bt clean` removes.
+
+VS Code selects `.venv` (that is the `Editable .venv` path `bt status` prints);
+to debug a released artifact instead, select
+`~/.local/share/pipx/venvs/efibootdude/bin/python`. This project ships no
+systemd unit. If one is added, name the stable path so a restart re-resolves
+the link, and switching between edit and release mode changes what the service
+runs without a reinstall:
+
+    ExecStart=%h/.local/bin/efibootdude
+
 ## The test gate
 
-Install what the gate needs (this is the interpreter that must run `bless`,
-too):
+Build what the gate needs with `bt`, which puts the editable package plus the
+`dev` extra into this tree's `.venv` (and the gate's tool floors with it):
 
-    python3 -m venv .venv
-    .venv/bin/python -m pip install -e '.[dev]'
+    bt penv        # from the project root; `bt penv efibootdude` from elsewhere
 
 `bless` runs every stage with `sys.executable`, so it has to be *that*
 interpreter -- the one holding `console-window` and the dev extra. Activate the
@@ -201,6 +248,16 @@ and the shared half lives in
   running a single gate. `bt` asks with it, and keeps its own copy of the policy
   for projects whose `bless` is older than the flag, so the branch note `bt`
   prints and the plan `publish` obeys are the same answer from the same code.
+* The environment was moved to the per-project model, which is the postscript
+  of the same procedure and changes where the *package* lives, not what `bless`
+  does. `bt penv` rebuilt `.venv` around the tree (editable `efibootdude` plus
+  the `dev` extra) instead of leaving it as a tools-only environment, and
+  [`runner`](../runner) now re-execs into `.venv/bin/python` so a source run
+  uses the pinned `console-window` rather than whatever a shared site directory
+  happens to hold. No entry point is installed for this project on the
+  development machine (`bt status`: `Owned by: nothing installed`), so
+  `~/.local/bin/efibootdude` stays free for `bt edit`, `bt test` or `bt prod`,
+  and `./runner` is the way to run the source.
 * `efibootdude` needed five things: one version location
   (`dynamic = ["version"]`), an inspector, the `dev` extra with `build`,
   `twine>=7` and `packaging>=26`, a console script that answers `--version`, and

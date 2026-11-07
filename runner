@@ -1,19 +1,49 @@
 #!/usr/bin/env python3
-# runner.py
+# runner
 # Located in the top-level APP directory
-# Wrapper to run APP from source for debugging
+# Run APP from source for debugging, under the project's editable virtualenv.
+#
+#   ./runner                       # re-execs into .venv/bin/python
+#   .venv/bin/python ./runner      # explicit, what a debugger does
+#
+# The per-project environment model puts the package and its dependencies in
+# <project>/.venv, and installs nothing into the shared user site.  This file
+# therefore starts the tree under .venv/bin/python even when it is launched with
+# some other interpreter, so `./runner` cannot pick up a stale copy of a
+# dependency (or a leftover `pip --user` install) instead of the pinned one.
+# It installs nothing and never writes to ~/.local/bin, so it never displaces a
+# released `efibootdude`.
 
+import os
 import runpy
 import sys
+from pathlib import Path
 
 # Ensure the package's top directory is on the path so 'APP' can be found.
 # This is usually necessary for debuggers to work correctly.
 # sys.path.insert(0, '.')
 
+DEVDIR = Path(__file__).resolve().parent
+VENV_PYTHON = DEVDIR / '.venv' / 'bin' / 'python'
+
+
+def reexec_into_venv():
+    """Hand this file to .venv/bin/python unless we are already running there."""
+    if Path(sys.executable).resolve() == VENV_PYTHON.resolve():
+        return
+    if not VENV_PYTHON.is_file():
+        sys.exit(f'{DEVDIR}: .venv is missing; build it with "bt penv" and retry')
+    os.execv(
+        str(VENV_PYTHON),
+        [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]],
+    )
+
+
 # Execute the main module of your package.
 # This mimics the behavior of the 'python -m APP.main' command.
 # This assumes your main execution logic (main() function) is in APP/main.py
 if __name__ == '__main__':
+    reexec_into_venv()
     # You pass the full module path: 'package_name.module_name'
     sys.argv[0] = 'efibootdude'  # This makes sys.argv look like the real command execution
     runpy.run_module('efibootdude.main', run_name='__main__', alter_sys=True)

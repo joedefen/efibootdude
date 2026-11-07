@@ -25,6 +25,23 @@ def test_virtualenvs_caches_and_artifacts_are_ignored():
         assert entry in lines, entry
 
 
+def test_the_development_environment_is_built_by_bt_around_the_tree():
+    """The package lives in `.venv`; the developer note has to say how it got there."""
+    text = DEV_DOC.read_text(encoding='utf-8')
+    assert 'bt penv' in text, DEV_DOC
+    assert '.venv/bin/python' in text, DEV_DOC
+    # The old model's instruction must not come back as the way to set up dev: it
+    # installed into the shared user site, so the tree itself held nothing to run.
+    assert "python -m pip install -e '.[dev]'" not in text, DEV_DOC
+
+
+def test_the_runner_stays_on_the_projects_editable_virtualenv():
+    """`./runner` must not fall back on a shared site-packages copy."""
+    runner = (ROOT / 'runner').read_text(encoding='utf-8')
+    assert '.venv' in runner, 'runner must run under the project .venv'
+    assert 'execv' in runner, 'runner must re-exec into .venv/bin/python'
+
+
 def test_ruff_configuration_lives_in_the_repository():
     ruff = pyproject()['tool']['ruff']
     assert ruff['target-version'] == 'py311'
