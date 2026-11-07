@@ -46,7 +46,15 @@ import traceback
 from dataclasses import dataclass, field
 
 # import xml.etree.ElementTree as ET
-from console_window import ConsoleWindow, ConsoleWindowOpts, InlineConfirmation, OptionSpinner, Theme
+from console_window import (
+    ConsoleWindow,
+    ConsoleWindowOpts,
+    InlineConfirmation,
+    OptionSpinner,
+    Theme,
+    semantic_attr,
+    set_colors_enabled,
+)
 
 from . import __version__
 
@@ -715,12 +723,18 @@ class EfiBootDude:
                 for entry in self.display_entries:
                     line = self.format_boot_entry(entry)
                     attr = None
+                    # Resolve every semantic role through the appearance layer.
+                    # This project deliberately has no --no-color switch and no
+                    # saved theme, but the helper still gives the one thing a
+                    # plain curses.color_pair() cannot: a monochrome attribute
+                    # (and plain text on a terminal without color) instead of an
+                    # exception, so a redraw never dies over decoration.
                     if '+ADD' in line:
-                        attr=cs.color_pair(Theme.SUCCESS)
+                        attr=semantic_attr(Theme.SUCCESS)
                     elif entry.is_boot and entry.removed:
                         # A pending removal is an edit, not an error: HOTSWAP
                         # (orange) leaves DANGER red to mean "input needed".
-                        attr=cs.color_pair(Theme.HOTSWAP)
+                        attr=semantic_attr(Theme.HOTSWAP)
                     elif entry.is_boot and not entry.active:
                         # Dim inactive boot entries
                         attr=cs.A_DIM
@@ -755,7 +769,7 @@ class EfiBootDude:
                                            f'{current_value}{cursor}')
                         self.win.add_body(
                             prompt_line,
-                            attr=cs.color_pair(Theme.DANGER) | cs.A_BOLD)
+                            attr=semantic_attr(Theme.DANGER) | cs.A_BOLD)
 
             self.win.render(redraw=self.redraw)
             self.redraw = False
@@ -1155,6 +1169,14 @@ def main():
     if '--version' in sys.argv[1:]:
         print(f'efibootdude {__version__}')
         return
+
+    # Honor the NO_COLOR convention (https://no-color.org): any non-empty
+    # value turns semantic roles into MONO_ROLES attributes instead of color
+    # pairs.  There is deliberately no --no-color flag: this app is a local
+    # full-screen TUI whose text markers (+ADD, -RMV) already carry the
+    # meaning, so the environment is enough for the rare terminal that needs
+    # it, and the theme cycle (T) stays a plain list of palettes.
+    set_colors_enabled(not os.environ.get('NO_COLOR'))
 
     parser = argparse.ArgumentParser()
     parser.add_argument('testfile', nargs='?', default=None)
