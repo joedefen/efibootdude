@@ -1,0 +1,38 @@
+
+[build-system]
+requires = ["flit_core>=3.12,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "efibootdude"
+dynamic = ["version"]
+description = "A visual wrapper for efibootmgr"
+authors = [
+    { name = "Joe Defen", email = "joedef@duck.com" }
+]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+keywords = ["efi", "uefi", "efibootmgr", "boot", "bootloader", "tui", "curses"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: System Administrators",
+    "Topic :: System :: Boot",
+    "Topic :: System :: Systems Administration"
+]
+dependencies = [
+    'console-window ~= 3.1.0',
+]
+
+[project.urls]
+"Homepage" = "https://github.com/joedefen/efibootdude"
+"Bug Tracker" = "https://github.com/joedefen/efibootdude/issues"
+
+[project.scripts]
+efibootdude = "efibootdude.main:main"
